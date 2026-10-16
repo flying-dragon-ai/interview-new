@@ -1,98 +1,239 @@
 const API_BASE = '/api';
 
+/**
+ * 持久化客户端（PRD 4.1.4 / 4.1.9 / E.1-E.2）
+ * 数据库未配置时各接口返回 503，调用方按「本地模式」降级，不阻断模拟。
+ */
+
 export interface Session {
   id: number;
   company: string;
   job_title: string;
   topic: string;
+  topic_type?: string;
+  roles?: unknown;
+  voice_enabled?: boolean;
+  camera_enabled?: boolean;
   status: string;
   created_at: string;
+  started_at?: string;
+  ended_at?: string;
   finished_at?: string;
 }
 
-export interface Message {
+export interface MessageRecord {
   id: number;
   session_id: number;
+  speaker?: string;
   speaker_type: string;
   speaker_id: string;
   speaker_name: string;
   message: string;
   round: number;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  confidence?: number | null;
   created_at: string;
 }
 
-// 创建新会话
-export async function createSession(company: string, jobTitle: string, topic: string, userId?: number | null): Promise<Session> {
-  const res = await fetch(`${API_BASE}/session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company, job_title: jobTitle, topic, user_id: userId }),
-  });
-  return res.json();
-}
-
-// 更新会话状态
-export async function updateSessionStatus(sessionId: number, status: string): Promise<Session> {
-  const res = await fetch(`${API_BASE}/session`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, status }),
-  });
-  return res.json();
-}
-
-// 保存对话消息
-export async function saveMessage(
-  sessionId: number,
-  speakerType: 'user' | 'ai',
-  speakerId: string,
-  speakerName: string,
-  message: string,
-  round: number
-): Promise<Message> {
-  const res = await fetch(`${API_BASE}/message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId,
-      speaker_type: speakerType,
-      speaker_id: speakerId,
-      speaker_name: speakerName,
-      message,
-      round,
-    }),
-  });
-  return res.json();
-}
-
-// 获取会话的所有消息
-export async function getMessages(sessionId: number): Promise<Message[]> {
-  const res = await fetch(`${API_BASE}/message?session_id=${sessionId}`);
-  return res.json();
-}
-
-// 保存反馈报告
-export async function saveFeedback(
-  sessionId: number,
-  feedback: {
-    timing: string;
-    voice_share: number;
-    structural_contribution: string;
-    interruption_handling: string;
-    overall_score: number;
-    suggestions: string[];
+async function parseJson<T>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
   }
-) {
-  const res = await fetch(`${API_BASE}/feedback`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, ...feedback }),
-  });
-  return res.json();
 }
 
-// 获取反馈报告
+// 创建会话（roles 为角色卡 id 列表）
+export async function createSession(params: {
+  company: string;
+  jobTitle: string;
+  topic: string;
+  topicType?: string;
+  roles?: string[];
+  voiceEnabled?: boolean;
+  cameraEnabled?: boolean;
+  userId?: number | null;
+}): Promise<Session | null> {
+  try {
+    const res = await fetch(`${API_BASE}/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company: params.company,
+        job_title: params.jobTitle,
+        topic: params.topic,
+        topic_type: params.topicType ?? 'business_case',
+        roles: params.roles ?? [],
+        voice_enabled: params.voiceEnabled ?? false,
+        camera_enabled: params.cameraEnabled ?? false,
+        user_id: params.userId ?? null,
+      }),
+    });
+    if (!res.ok) return null;
+    return await parseJson<Session>(res);
+  } catch {
+    return null; // 本地模式：无数据库也能模拟
+  }
+}
+
+export async function updateSessionStatus(sessionId: number, status: string): Promise<Session | null> {
+  try {
+    const res = await fetch(`${API_BASE}/session`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, status }),
+    });
+    if (!res.ok) return null;
+    return await parseJson<Session>(res);
+  } catch {
+    return null;
+  }
+}
+
+// 删除会话及全部记录（隐私：TC-11 不可恢复）
+export async function deleteSession(sessionId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/session`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function saveMessage(params: {
+  sessionId: number;
+  speaker: string;
+  speakerType: 'user' | 'ai';
+  speakerId: string;
+  speakerName: string;
+  message: string;
+  round: number;
+  startMs?: number;
+  endMs?: number;
+  confidence?: number;
+  stepfunSegmentId?: string | null;
+}): Promise<MessageRecord | null> {
+  try {
+    const res = await fetch(`${API_BASE}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: params.sessionId,
+        speaker: params.speaker,
+        speaker_type: params.speakerType,
+        speaker_id: params.speakerId,
+        speaker_name: params.speakerName,
+        message: params.message,
+        round: params.round,
+        start_ms: params.startMs,
+        end_ms: params.endMs,
+        confidence: params.confidence,
+        stepfun_segment_id: params.stepfunSegmentId ?? null,
+      }),
+    });
+    if (!res.ok) return null;
+    return await parseJson<MessageRecord>(res);
+  } catch {
+    return null;
+  }
+}
+
+export async function getMessages(sessionId: number): Promise<MessageRecord[]> {
+  try {
+    const res = await fetch(`${API_BASE}/message?session_id=${sessionId}`);
+    if (!res.ok) return [];
+    return (await parseJson<MessageRecord[]>(res)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// 事件日志批量入库（PRD 4.1.4）
+export async function saveEvents(
+  sessionId: number,
+  events: import('../types').GameEvent[]
+): Promise<boolean> {
+  if (!sessionId || events.length === 0) return false;
+  try {
+    const res = await fetch(`${API_BASE}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, events }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// 保存报告 v1.5（reports JSONB 列）
+export async function saveReport(params: {
+  sessionId: number;
+  report: import('../types').ReportV15;
+  legacy?: import('../types').FeedbackData;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: params.sessionId,
+        overall_score: params.report.overall_score,
+        dimension_scores: params.report.dimensions,
+        evidence_pool: [
+          ...params.report.dimensions.content.evidence,
+          ...params.report.dimensions.stress.evidence,
+          ...params.report.dimensions.teamwork.evidence,
+        ],
+        suggestions: params.report.suggestions,
+        timing: params.legacy?.timing ?? null,
+        voice_share: params.legacy?.voiceShare ?? null,
+        structural_contribution: params.legacy?.structuralContribution ?? null,
+        interruption_handling: params.legacy?.interruptionHandling ?? null,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function getFeedback(sessionId: number) {
-  const res = await fetch(`${API_BASE}/feedback?session_id=${sessionId}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}/feedback?session_id=${sessionId}`);
+    if (!res.ok) return null;
+    return await parseJson<unknown>(res);
+  } catch {
+    return null;
+  }
+}
+
+// 触发服务端面后分析（/api/sessions/{id}/analyze）
+export async function triggerAnalyze(sessionId: number): Promise<import('../types').ReportV15 | null> {
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/analyze`, { method: 'POST' });
+    if (!res.ok) return null;
+    return await parseJson<import('../types').ReportV15>(res);
+  } catch {
+    return null;
+  }
+}
+
+// 预设形象列表
+export async function getAvatarPresets(): Promise<import('../types').AvatarPreset[]> {
+  try {
+    const res = await fetch(`${API_BASE}/avatars/presets`);
+    if (!res.ok) return [];
+    const data = await parseJson<{ presets: import('../types').AvatarPreset[] }>(res);
+    return data?.presets ?? [];
+  } catch {
+    return [];
+  }
 }

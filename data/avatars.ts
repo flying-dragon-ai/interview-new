@@ -1,0 +1,152 @@
+import type { AvatarPreset } from '../types';
+
+/**
+ * 预设形象库（PRD 4.1.8 / 附录 D.3 avatars 表）
+ * P0 门槛：≥8 个预设、覆盖 ≥4 行业；本库 12 个、覆盖 8 行业。
+ * - 静态图 + 说话高亮 + 音色绑定（PRD 4.1.8）
+ * - viseme/emotion 资源为 P1（口型同步），当前为 null，前端降级为静态头像 + 高亮
+ * - 全部为风格化虚拟形象，不使用真实名人肖像/姓名（C7）
+ */
+export const AVATAR_PRESETS: AvatarPreset[] = [
+  {
+    id: 'visionary_01',
+    name: '远见者',
+    industry: 'tech',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Visionary&backgroundColor=b6e3f4',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_01',
+    tags: ['科技', '激进', '远见'],
+  },
+  {
+    id: 'legend_01',
+    name: '传奇产品人',
+    industry: 'tech',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Legend&backgroundColor=c0aede',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_02',
+    tags: ['科技', '挑剔', '深度'],
+  },
+  {
+    id: 'master_01',
+    name: '供应链大师',
+    industry: 'tech',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Master&backgroundColor=d1d4f9',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_03',
+    tags: ['科技', '稳健', '数据'],
+  },
+  {
+    id: 'pioneer_01',
+    name: '加密先锋',
+    industry: 'tech',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/big-smile/svg?seed=Pioneer&backgroundColor=ffdfbf',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_01',
+    tags: ['科技', '高调', '营销'],
+  },
+  {
+    id: 'investor_01',
+    name: '价值投资者',
+    industry: 'finance',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/personas/svg?seed=Investor&backgroundColor=b6e3f4',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_02',
+    tags: ['金融', '保守', '长期'],
+  },
+  {
+    id: 'analyst_01',
+    name: '投行分析师',
+    industry: 'finance',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/personas/svg?seed=Analyst&backgroundColor=ffd5dc',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_04',
+    tags: ['金融', '高压', '数字'],
+  },
+  {
+    id: 'consultant_01',
+    name: '战略顾问',
+    industry: 'consulting',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Consultant&backgroundColor=c0aede',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_05',
+    tags: ['咨询', '结构化', '框架'],
+  },
+  {
+    id: 'brand_01',
+    name: '品牌总监',
+    industry: 'fmcg',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/big-smile/svg?seed=Brand&backgroundColor=ffdfbf',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_04',
+    tags: ['快消', '创意', '故事'],
+  },
+  {
+    id: 'ops_01',
+    name: '运营总监',
+    industry: 'manufacturing',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ops&backgroundColor=d1d4f9',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_03',
+    tags: ['制造', '务实', '流程'],
+  },
+  {
+    id: 'expert_01',
+    name: '行业专家',
+    industry: 'medical_education',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/personas/svg?seed=Expert&backgroundColor=b6e3f4',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_05',
+    tags: ['医疗', '教育', '严谨'],
+  },
+  {
+    id: 'hr_01',
+    name: '招聘经理',
+    industry: 'hr',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/big-smile/svg?seed=HR&backgroundColor=ffd5dc',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_04',
+    tags: ['HR', '亲和', '协调'],
+  },
+  {
+    id: 'tech_01',
+    name: '技术面试官',
+    industry: 'internet',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Tech&backgroundColor=c0aede',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'stepfun_voice_02',
+    tags: ['互联网', '逻辑', '追问'],
+  },
+];
+
+export function findAvatarPreset(id: string): AvatarPreset | undefined {
+  return AVATAR_PRESETS.find((a) => a.id === id);
+}
+
+/** 形象库覆盖的行业数（M4 验收：≥8 行业为长期目标，P0 ≥4） */
+export function avatarIndustryCount(): number {
+  return new Set(AVATAR_PRESETS.map((a) => a.industry)).size;
+}

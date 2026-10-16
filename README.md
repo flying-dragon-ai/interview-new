@@ -10,7 +10,75 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1.18-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
 
 </div>
+---
 
+## 🆕 v0.7-tow 升级说明（语音化 + 真实计时 + 安全债清偿）
+
+依据 `tododocs/lgd-prdword-tow.md`（v0.7-tow，v0.6 全量刷新）完成改造：
+
+| 项 | v0.6（旧） | v0.7-tow（现在） |
+|---|---|---|
+| LLM 调用 | 前端直调 DeepSeek，**key 注入 bundle（D1 违反）** | 全部经 `/api/llm` 服务端代理，key 仅存服务端 env |
+| 数据库凭据 | 4 个 `api/*.ts` 硬编码 RDS 账号密码（D2） | `DATABASE_URL` 环境变量，源码 0 明文凭据 |
+| 登录死代码 | `api/auth.ts` + `login/admin` 页残留（D3） | 已删除；免登录 + 每场会话级记录 + 一键删除 |
+| 阶段推进 | 关键词 + 25 轮上限（D4） | 倒计时四阶段主信号：审题 2min → 个人陈述每人 1min → 自由讨论 ≤15min → 总结 3min |
+| 角色 | 3 个硬编码 | 12 张角色卡数据驱动（音色/形象/策略/性格约束分配） |
+| 形象 | dicebear 静态 SVG | 12 预设形象库（≥8 行业）+ 说话高亮 + 音色绑定 |
+| 发言权 | 洗牌队列 + 用户保护 | 调度 v1：B.3 打分公式 + B.5 打断规则 + B.6 用户保护，events 落库 |
+| 语音 | 仅 Web Speech 输入，AI 文字回复 | StepFun TTS 播报（3 音色 + emotion）+ ASR 主路径 + Web Speech/文字兜底 + barge-in |
+| 报告 | 4 文本字段 + 总分 | v1.5：维度分 + evidence 引用 + 规则引擎实算 + 事件时间轴 |
+| 隐私 | 无 | 明确同意后保存转写/聚合特征；原始音视频不保存；删除本次记录 |
+| 设备检测 | 无 | 麦克风/摄像头/扬声器/网络依次检测 + 移动端专项提示 |
+
+### 快速开始
+
+```bash
+pnpm install
+cp .env.example .env.local   # 填入 DEEPSEEK_API_KEY / STEPFUN_API_KEY / DATABASE_URL
+pnpm dev                     # http://localhost:3000
+pnpm verify                  # 密钥扫描 + typecheck + 测试 + 构建 + TC-00 bundle 检查
+```
+
+### 环境变量（仅服务端，前端 0 暴露）
+
+| 变量 | 用途 | 未配置时行为 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | `/api/llm` 代理调用 DeepSeek | 题目/发言/报告不可用（界面提示降级） |
+| `STEPFUN_API_KEY` | `/api/tts-token`、`/api/asr-token` 签发短时凭证 | 自动降级：Web Speech 输入 + 文字播报 |
+| `DATABASE_URL` | 会话/消息/事件/报告落库 | 本地模式：不落库，模拟照常进行 |
+
+### 数据库迁移
+
+```bash
+psql "$DATABASE_URL" -f db/migration-v0.7.sql
+```
+
+迁移内容（PRD 附录 D）：`simulation_sessions→sessions`（+roles JSONB 等）、`conversation_records→transcripts`（+时间戳/置信度）、`feedback_reports→reports`（+dimension_scores/evidence_pool/suggestions JSONB）、新增 `events`/`visual_features`/`avatars` 表与索引。**执行前务必完成 D1/D2 凭据轮换（旧凭据视为已泄露）**。
+
+### API 一览
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/llm` | DeepSeek 代理：`topic`/`reply`/`feedback`/`analyze`，SSE 流式，服务端限流 |
+| POST | `/api/tts-token` · `/api/asr-token` | StepFun 短时凭证签发（前端不持 key） |
+| POST/GET | `/api/events` | 发言权调度事件日志 |
+| POST/GET/PUT/DELETE | `/api/session` | 会话管理（DELETE 级联删除全部记录） |
+| POST/GET | `/api/message` | 转写落库（transcripts） |
+| POST/GET | `/api/feedback` | 报告落库（reports JSONB） |
+| GET/DELETE | `/api/sessions/{id}` | 会话详情 / 删除（隐私，TC-11） |
+| POST | `/api/sessions/{id}/analyze` | 触发面后分析（规则引擎 + LLM） |
+| GET | `/api/sessions/{id}/report` | 报告 v1.5 |
+| GET/DELETE | `/api/avatars/presets` · `/api/avatars?id=` | 预设形象 / 删除上传形象 |
+
+### 验证与质量门
+
+```bash
+pnpm check:secrets   # D1/D2 源码回归：无硬编码 key/凭据
+pnpm test            # 60 个 node:test 用例：阶段引擎/调度/角色分配/报告引擎/代理集成
+pnpm check:bundle    # TC-00：构建产物无任何 key/凭据
+```
+
+P1/P2（LiveKit 实时房间、MediaPipe 视觉、viseme 口型、报告追问等）按 PRD §4.2/§4.3 排期，不在本期范围。
 ---
 
 ## 📸 产品首页
