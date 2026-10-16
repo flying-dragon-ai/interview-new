@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import SetupForm from './components/SetupForm';
 import DeviceCheck, { type DeviceCheckResult } from './components/DeviceCheck';
-import DiscussionPanel from './components/DiscussionPanel';
+import VoiceRoom from './components/VoiceRoom';
 import EvidenceReport from './components/EvidenceReport';
 import FeedbackReport from './components/FeedbackReport';
 import PrivacyPolicy from './components/PrivacyPolicy';
@@ -17,7 +17,7 @@ import {
 
 /**
  * 应用主流程（PRD 5.2 目标流程）
- * SetupForm → DeviceCheck → DiscussionPanel（倒计时四阶段）→ EvidenceReport（v1.5）
+ * SetupForm → DeviceCheck → VoiceRoom（倒计时四阶段）→ EvidenceReport（v1.5）
  * 降级路径：无麦克风 → 纯文字；无摄像头 → 纯语音；弱网 → 纯语音/纯文字。
  */
 
@@ -209,8 +209,8 @@ const App: React.FC = () => {
         )}
 
         {state.status === 'DISCUSSING' && (
-          <div className="max-w-6xl mx-auto h-full">
-            <DiscussionPanel
+          <div className="max-w-7xl mx-auto h-full">
+            <VoiceRoom
               state={state}
               roles={roles}
               sessionId={sessionId}
@@ -218,6 +218,7 @@ const App: React.FC = () => {
               cameraEnabled={cameraEnabled}
               facingMode={facingMode}
               onFinish={finishSimulation}
+              onExit={restart}
             />
           </div>
         )}

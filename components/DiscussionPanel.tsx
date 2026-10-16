@@ -705,6 +705,22 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         )}
       </div>
 
+      {/* 发言轨迹（PRD 4.1.3 底部发言时间轴） */}
+      {messages.length > 0 && (
+        <div className="px-3 md:px-4 py-1.5 bg-white border-t border-slate-50 flex items-center gap-2">
+          <span className="text-[10px] text-slate-400 font-bold shrink-0">发言轨迹</span>
+          <div className="flex-1 flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            {messages.slice(-50).map((m) => (
+              <span
+                key={m.id}
+                title={`${m.senderName}：${m.content.slice(0, 30)}`}
+                className={`h-2 rounded-full shrink-0 ${m.senderId === 'user' ? 'bg-slate-900 w-7' : 'bg-indigo-300 w-3.5'}`}
+              />
+            ))}
+          </div>
+          <span className="text-[10px] text-slate-400 shrink-0">共 {messages.length} 次发言</span>
+        </div>
+      )}
       {/* 底部输入 */}
       <div className="p-3 md:p-4 bg-white border-t border-slate-100">
         <div className="max-w-4xl mx-auto flex gap-2 md:gap-3 items-end">

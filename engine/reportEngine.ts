@@ -273,6 +273,13 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
           语速WPM: m.speakingRateWpm || 'N/A（文字版无 ASR 时间戳）',
           被打断次数: m.interruptedCount,
           平均恢复时长ms: m.interruptRecoveryMs ?? 'N/A',
+          发言时段分布:
+            m.timeDistribution.length > 0
+              ? m.timeDistribution
+                  .slice(0, 5)
+                  .map((b) => `${Math.round(b.bucketStartMs / 60000)}min/${b.userChars}字`)
+                  .join(' ')
+              : 'N/A',
         },
         note: '语音副语言特征需 ASR 时间戳（M2），当前为文字版规则近似',
       },

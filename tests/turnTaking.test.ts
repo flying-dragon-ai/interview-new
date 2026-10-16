@@ -16,7 +16,9 @@ import {
   registerUserMissedTurn,
 } from '../engine/turnTaking.ts';
 import { ROLE_CARDS } from '../data/roleCards.ts';
+import type { RoleCard } from '../types.ts';
 import type { TurnTakingState } from '../engine/turnTaking.ts';
+import { createRng } from '../engine/roleSelector.ts';
 const highConflict = ROLE_CARDS.find((c) => c.id === 'ib_analyst')!;
 const highCoop = ROLE_CARDS.find((c) => c.id === 'strategy_consultant')!;
 const neutral = ROLE_CARDS.find((c) => c.id === 'ops_director')!;
@@ -135,6 +137,16 @@ test('B.5: 用户被点名 5 秒未回应 → 其他 AI 接话', () => {
   }
 });
 
+test('B.1: 洗牌兜底——同分随机（fallback_shuffle）且可复现', () => {
+  const state = createTurnState();
+  const ctx = { now: 0, stageUrgency: 0, silenceMs: 0 };
+  const twin: RoleCard = { ...neutral, id: 'ops_twin' };
+  const d1 = selectNextSpeaker([neutral, twin], state, ctx, createRng(3));
+  const d2 = selectNextSpeaker([neutral, twin], state, ctx, createRng(3));
+  assert.equal(d1.reason, 'fallback_shuffle');
+  assert.equal(d1.speakerId, d2.speakerId); // 同种子可复现
+  assert.ok([neutral.id, twin.id].includes(d1.speakerId));
+});
 test('调度：正常路径按打分公式选最高分', () => {
   const state = createTurnState();
   const decision = selectNextSpeaker(cards, state, { now: 0, stageUrgency: 0, silenceMs: 0 });

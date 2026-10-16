@@ -92,6 +92,10 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
+function pick<T>(arr: T[], rng: () => number): T {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
 /** 最近发言占比：该 speaker 窗口内发言次数 / 窗口内总发言次数 */
 export function recentSpeakRatio(state: TurnTakingState, speaker: string, now: number): number {
   const windowStart = now - RECENT_WINDOW_MS;
@@ -155,7 +159,8 @@ export interface SpeakerDecision {
 export function selectNextSpeaker(
   cards: RoleCard[],
   state: TurnTakingState,
-  ctx: ScoreContext
+  ctx: ScoreContext,
+  rng: () => number = Math.random
 ): SpeakerDecision {
   const candidates = cards.filter((c) => c.id !== state.currentSpeaker);
 
@@ -175,17 +180,26 @@ export function selectNextSpeaker(
 
   let best = pool[0];
   let bestScore = computeSpeakScore(best, state, ctx);
+  const ties: RoleCard[] = [pool[0]];
   for (const c of pool.slice(1)) {
     const s = computeSpeakScore(c, state, ctx);
-    if (s > bestScore) {
+    if (s > bestScore + 1e-9) {
       best = c;
       bestScore = s;
+      ties.length = 0;
+      ties.push(c);
+    } else if (Math.abs(s - bestScore) <= 1e-9) {
+      ties.push(c);
     }
   }
+
+  // B.1：洗牌队列兜底——打平或全部零分时随机（避免可预测/冷场）
+  if (bestScore <= 0 || ties.length > 1) {
+    best = pick(ties, rng);
+    return { speakerId: best.id, score: bestScore, reason: 'fallback_shuffle' };
+  }
   const reason: SpeakerDecision['reason'] =
-    (state.consecutiveSpeaks[best.id] ?? 0) >= INTERRUPT_RULES.maxConsecutive
-      ? 'force_yield'
-      : 'score';
+    (state.consecutiveSpeaks[best.id] ?? 0) >= INTERRUPT_RULES.maxConsecutive ? 'force_yield' : 'score';
   return { speakerId: best.id, score: bestScore, reason };
 }
 
