@@ -248,7 +248,14 @@ const App: React.FC = () => {
                 onDeleteRecords={handleDeleteRecords}
               />
             ) : legacyFeedback ? (
-              <FeedbackReport feedback={legacyFeedback} onRestart={restart} />
+              <div className="space-y-4">
+                {feedbackError && (
+                  <div className="max-w-3xl mx-auto text-center text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+                    ⚠️ v1.5 证据化报告生成失败（LLM 异常），已降级展示经典四维评价
+                  </div>
+                )}
+                <FeedbackReport feedback={legacyFeedback} onRestart={restart} />
+              </div>
             ) : (
               <div className="text-center p-8 bg-white rounded-3xl shadow-xl">
                 <h2 className="text-2xl font-bold text-red-500 mb-4">反馈生成失败</h2>

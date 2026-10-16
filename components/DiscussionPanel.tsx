@@ -443,7 +443,8 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             metadata: { rule: noResp.rule },
           },
         ]);
-        turnRef.current = { ...turnRef.current, userCalledAt: null };
+        // 接管后重置计数，避免「强制分配→5秒接管→再强制分配」死循环（B.6 语义修正）
+        turnRef.current = { ...turnRef.current, userCalledAt: null, userMissedTurns: 0 };
         setAwaitingUser(false);
         const card = roles.find((c) => c.id === noResp.interrupterId);
         if (card) triggerAITurnRef.current(card);
