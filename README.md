@@ -74,9 +74,11 @@ psql "$DATABASE_URL" -f db/migration-v0.7.sql
 
 ```bash
 pnpm check:secrets   # D1/D2 源码回归：无硬编码 key/凭据
-pnpm test            # 61 个 node:test 用例：阶段引擎/调度/角色分配/报告引擎/代理集成
+pnpm test            # 109 个 node:test 用例（含 API/语音/隐私/接线集成测试）：阶段引擎/调度/角色分配/报告引擎/代理集成
 pnpm check:bundle    # TC-00：构建产物无任何 key/凭据
 ```
+
+逐项测试审计报告见 [docs/test-audit.md](docs/test-audit.md)（附录 H 的 TC-00~TC-15、C1~C10、8.2、US-01~16 全覆盖）。
 
 P1/P2（LiveKit 实时房间、MediaPipe 视觉、viseme 口型、报告追问等）按 PRD §4.2/§4.3 排期，不在本期范围。
 ---

@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
 import type { GameEvent, Message, ReportV15 } from '../../types';
 import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../../engine/reportEngine.ts';
-import { callDeepSeek } from './llm';
-import { buildAnalysisPrompt } from './prompts';
-import { safeJsonParse } from './jsonStream';
+import { callDeepSeek } from './llm.ts';
+import { buildAnalysisPrompt } from './prompts.ts';
+import { safeJsonParse } from './jsonStream.ts';
 
 /**
  * 面后分析流水线（PRD 7.6 / E.2：/api/sessions/{id}/analyze）

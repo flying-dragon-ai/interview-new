@@ -99,8 +99,11 @@ export class VoiceService {
   private asrOnPartial: ((text: string) => void) | null = null;
   private asrOnFinal: ((text: string) => void) | null = null;
 
-  constructor() {
+  constructor(overrides?: Partial<Pick<VoiceCapabilities, 'inputMode' | 'outputMode'>>) {
     this.caps = detectCapabilities();
+    // 测试/特殊场景可强制指定模式（如无浏览器环境下验证 TTS 协议）
+    if (overrides?.inputMode) this.caps.inputMode = overrides.inputMode;
+    if (overrides?.outputMode) this.caps.outputMode = overrides.outputMode;
     this.inputMode = this.caps.inputMode;
     this.outputMode = this.caps.outputMode;
   }
@@ -116,10 +119,10 @@ export class VoiceService {
       try {
         const res = await fetch('/api/asr-token', { method: 'POST' });
         if (!res.ok) {
-          this.inputMode = this.caps.hasWebSpeech ? 'webspeech' : 'text';
+          this.setInputMode(this.caps.hasWebSpeech ? 'webspeech' : 'text');
         }
       } catch {
-        this.inputMode = this.caps.hasWebSpeech ? 'webspeech' : 'text';
+        this.setInputMode(this.caps.hasWebSpeech ? 'webspeech' : 'text');
       }
     }
     // TTS 凭证探测
@@ -127,14 +130,24 @@ export class VoiceService {
       try {
         const res = await fetch('/api/tts-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         if (!res.ok) {
-          this.outputMode = 'text-only';
+          this.setOutputMode('text-only');
         }
       } catch {
-        this.outputMode = 'text-only';
+        this.setOutputMode('text-only');
       }
     }
     this.caps = { ...this.caps, inputMode: this.inputMode, outputMode: this.outputMode };
     return this.caps;
+  }
+
+  private setInputMode(mode: InputMode) {
+    this.inputMode = mode;
+    this.caps = { ...this.caps, inputMode: mode };
+  }
+
+  private setOutputMode(mode: OutputMode) {
+    this.outputMode = mode;
+    this.caps = { ...this.caps, outputMode: mode };
   }
 
   onSpeakingChange(cb: (speaking: boolean) => void): () => void {
@@ -177,8 +190,9 @@ export class VoiceService {
       this.mediaRecorder.start(250);
     } catch {
       // 无麦克风权限 → 降级
-      this.inputMode = this.caps.hasWebSpeech ? 'webspeech' : 'text';
-      if (this.inputMode === 'webspeech') this.startWebSpeech(onPartial, onFinal);
+      const degradedMode: InputMode = this.caps.hasWebSpeech ? 'webspeech' : 'text';
+      this.setInputMode(degradedMode);
+      if (degradedMode === 'webspeech') this.startWebSpeech(onPartial, onFinal);
     }
   }
 
@@ -315,9 +329,11 @@ export class VoiceService {
         const ws = new WebSocket(endpoint);
         this.ttsWs = ws;
         let settled = false;
+        let safetyTimer: ReturnType<typeof setTimeout> | null = null;
         const finish = (err?: unknown) => {
           if (settled) return;
           settled = true;
+          if (safetyTimer) clearTimeout(safetyTimer);
           this.ttsWs = null;
           err ? reject(err) : resolve();
         };
@@ -353,12 +369,12 @@ export class VoiceService {
         };
         ws.onerror = () => finish(new Error('TTS WebSocket 错误'));
         ws.onclose = () => finish();
-        // 安全超时：异常协议下不卡住流程
-        setTimeout(() => finish(), Math.max(15_000, text.length * 300));
+        // 安全超时：异常协议下不卡住流程（finish 时清除，避免定时器泄漏）
+        safetyTimer = setTimeout(() => finish(), Math.max(15_000, text.length * 300));
       });
     } catch (err) {
       console.error('StepFun TTS 失败，降级文字播报:', err);
-      this.outputMode = 'text-only';
+      this.setOutputMode('text-only');
     } finally {
       // 等音频队列播完再置闲（barge-in 会立即清空）
       const waitDrain = () => {

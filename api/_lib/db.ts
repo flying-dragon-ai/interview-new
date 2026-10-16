@@ -35,6 +35,11 @@ export function getPool(): Pool {
   return pool;
 }
 
+/** 测试注入：允许测试替换连接池（不触真实数据库） */
+export function setPoolForTesting(mock: Pool | null): void {
+  pool = mock;
+}
+
 /** 供 serverless 复用连接（同一实例内） */
 export async function withDb<T>(fn: (pool: Pool) => Promise<T>): Promise<T> {
   return fn(getPool());

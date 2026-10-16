@@ -23,7 +23,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
     // 数据库删除（P1 上传形象）：未配置数据库时仅返回成功语义
     try {
-      const { getPool, isDatabaseConfigured } = await import('./_lib/db');
+      const { getPool, isDatabaseConfigured } = await import('./_lib/db.ts');
       if (isDatabaseConfigured()) {
         await getPool().query('DELETE FROM avatars WHERE id = $1', [id]);
       }
