@@ -1,1 +1,0 @@
-{"audience":"项目接手的研发、测试与产品协作者","reader_task":"从代码逆向还原群面模拟器的已定需求：明确用户问题、已实现范围、产品行为、边界与验收标准，作为后续迭代基线","genre_contract":"workplace.prd","adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"讨论阶段为单向状态机且 AI 发言调度有依赖分支，用图示降低验收与排查成本","blocks":[{"type":"whiteboard","min_count":1,"purpose":"展示会话状态机与讨论四阶段推进及 AI 调度流程"}]}}

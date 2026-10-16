@@ -22,7 +22,60 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
 .vercel
 
 # Local docs drafts (never commit)
 tododocs/
+# 本地草稿目录（演示/评审中间产物，不提交）
+draft_*/
+
+# ============================================================
+# 环境变量与密钥（D1/C9：任何 key 都不进 git）
+# .env.example 是唯一允许提交的模板（值为空）
+# ============================================================
+.env
+.env.*
+!.env.example
+
+# 证书与私钥
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+id_rsa*
+id_ed25519*
+
+# ============================================================
+# 构建与工具缓存
+# ============================================================
+*.tsbuildinfo
+*.npmrc
+coverage/
+.nyc_output/
+.pnpm-store/
+.npm/
+.yarn/
+.cache/
+.parcel-cache/
+.temp/
+tmp/
+temp/
+
+# 依赖打包产物
+*.tgz
+*.tar.gz
+*.zip
+
+# 编辑器/系统备份与临时文件
+*.bak
+*.orig
+*.tmp
+*.temp
+*~
+Thumbs.db
+desktop.ini
+ehthumbs.db
