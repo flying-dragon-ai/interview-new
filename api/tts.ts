@@ -1,0 +1,122 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.ts';
+import { createSseWriter } from './_lib/sse.ts';
+import { checkRateLimit } from './_lib/ratelimit.ts';
+
+/**
+ * /api/tts —— StepFun TTS 服务端代理（PRD 4.1.5 / G.4 / C9）
+ * 前端不持 key：本端注入 STEPFUN_API_KEY 调 /v1/audio/speech（stream_format=sse），
+ * 音频分片（PCM 24kHz s16le base64）经 SSE 透传。
+ * 文档：https://platform.stepfun.com/docs/zh/api-reference/audio/create-audio
+ */
+
+const STEP_TTS_URL = 'https://api.stepfun.com/v1/audio/speech';
+
+function getClientIp(req: VercelRequest): string | undefined {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string') return fwd.split(',')[0].trim();
+  if (Array.isArray(fwd)) return fwd[0];
+  return req.socket?.remoteAddress;
+}
+
+export default async function handler(request: VercelRequest, response: VercelResponse) {
+  if (request.method !== 'POST') {
+    return response.status(405).json({ error: 'Method not allowed' });
+  }
+  if (!isStepFunConfigured()) {
+    return response.status(503).json({
+      error: 'STEPFUN_NOT_CONFIGURED',
+      message: '服务端未配置 STEPFUN_API_KEY，语音合成不可用，将降级为浏览器语音/文字',
+      fallback: 'webspeech-tts',
+    });
+  }
+
+  const body = (request.body ?? {}) as {
+    text?: string;
+    voice_id?: string;
+    rate?: number;
+    instruction?: string;
+    session_id?: number | null;
+  };
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
+  const voiceId = typeof body.voice_id === 'string' ? body.voice_id.trim() : '';
+  if (!text || !voiceId) {
+    return response.status(400).json({ error: 'text 与 voice_id 必填' });
+  }
+  if (text.length > 1000) {
+    return response.status(400).json({ error: 'text 超过 1000 字上限（stepaudio-3-tts）' });
+  }
+
+  const limit = checkRateLimit(getClientIp(request), body.session_id ?? null);
+  if (!limit.allowed) {
+    return response.status(429).json({ error: 'rate_limited', reason: limit.reason, retry_after_ms: limit.retryAfterMs });
+  }
+
+  const rate = typeof body.rate === 'number' && !Number.isNaN(body.rate) ? Math.min(2, Math.max(0.5, body.rate)) : 1;
+  const instruction = typeof body.instruction === 'string' && body.instruction.trim() ? body.instruction.trim().slice(0, 500) : undefined;
+
+  let upstream: globalThis.Response;
+  try {
+    upstream = await fetch(STEP_TTS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.STEPFUN_API_KEY!.trim()}`,
+      },
+      body: JSON.stringify({
+        model: STEPFUN_CONFIG.tts.model,
+        input: text,
+        voice: voiceId,
+        response_format: 'pcm',
+        sample_rate: 24000,
+        speed: rate,
+        ...(instruction ? { instruction } : {}),
+        stream_format: 'sse',
+      }),
+    });
+  } catch (err) {
+    return response.status(502).json({ error: 'TTS_UPSTREAM_UNREACHABLE', message: err instanceof Error ? err.message : String(err) });
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    const errText = await upstream.text().catch(() => '');
+    return response.status(502).json({ error: 'TTS_UPSTREAM_FAILED', message: errText || `HTTP ${upstream.status}` });
+  }
+
+  // SSE 透传：上游 speech.audio.delta/done/error → 客户端 delta/done/error
+  const sse = createSseWriter(response);
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const data = JSON.parse(payload) as { type?: string; audio?: string; message?: string };
+          if (data.type === 'speech.audio.delta' && typeof data.audio === 'string' && data.audio) {
+            sse.send('delta', { audio: data.audio });
+          } else if (data.type === 'speech.audio.done') {
+            sse.send('done', {});
+          } else if (data.type === 'speech.audio.error') {
+            sse.send('error', { message: data.message ?? 'TTS 上游错误' });
+          }
+        } catch {
+          // 忽略单条解析失败
+        }
+      }
+    }
+  } catch (err) {
+    sse.send('error', { message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    reader.releaseLock();
+    sse.close();
+  }
+}

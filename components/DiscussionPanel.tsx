@@ -273,7 +273,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         }
 
         // TTS 播报（barge-in 由用户输入/说话触发）
-        if (voiceCaps?.outputMode === 'stepfun-tts' && voiceRef.current) {
+        if ((voiceCaps?.outputMode === 'stepfun-tts' || voiceCaps?.outputMode === 'webspeech-tts') && voiceRef.current) {
           setSpeakingCharId(card.id);
           try {
             await voiceRef.current.speak(content, {
@@ -788,9 +788,12 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
           <span>
             语音输入：{voiceCaps?.inputMode === 'stepfun-asr' ? 'StepFun ASR' : voiceCaps?.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）'}
             {' · '}
-            语音输出：{voiceCaps?.outputMode === 'stepfun-tts' ? 'StepFun TTS' : '纯文字（降级）'}
+            语音输出：{voiceCaps?.outputMode === 'stepfun-tts' ? 'StepFun TTS' : voiceCaps?.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）'}
           </span>
           <span>发言权由调度器分配 · 倒计时到点强制切换阶段</span>
+          {voiceCaps?.note && (
+            <div className="max-w-4xl mx-auto mt-1 text-[10px] text-amber-500">{voiceCaps.note}</div>
+          )}
         </div>
       </div>
       </div>

@@ -77,7 +77,7 @@ test('报告 v1.5：维度满分与过渡权重（内容40/语音25/抗压20/协
   assert.equal(report.dimensions.content.max, 40);
   assert.equal(report.dimensions.voice.max, 25);
   assert.equal(report.dimensions.stress.max, 20);
-  assert.equal(report.dimensions.teamwork.max, 10);
+  assert.equal(report.dimensions.teamwork.max, 15);
   assert.equal(report.dimensions.visual.status, 'not_enabled');
   assert.ok(report.overall_score >= 0 && report.overall_score <= 100);
   assert.ok(report.suggestions.length >= 1 && report.suggestions.length <= 5);

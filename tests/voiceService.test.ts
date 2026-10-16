@@ -48,8 +48,8 @@ class MockAudioSource {
   }
   start(t: number) {
     this.startedAt = t;
-    // 模拟播放结束（真实 AudioBufferSource 播完触发 onended）
-    setTimeout(() => this.onended?.(), 0);
+    // 模拟播放结束（真实 AudioBufferSource 播完触发 onended）；按 buffer 时长调度
+    setTimeout(() => this.onended?.(), ((this.buffer?.duration ?? 0) * 1000));
   }
   stop() {
     this.stopped = true;
@@ -155,61 +155,64 @@ test('TC-10: 凭证可用时保持 StepFun 模式', async () => {
 
 // ---------- TC-12：TTS 流式协议 ----------
 
-test('TC-12/G.1: TTS WebSocket 协议（session.update + tts.text.delta + instruction + audio.delta 播放）', async () => {
-  globalThis.fetch = (async () =>
-    new Response(
-      JSON.stringify({ token: 'tok', expires_in: 900, endpoint: 'wss://api.stepfun.com/v1/realtime/audio', model: 'stepaudio-3-tts', voice_id: 'stepfun_voice_04' }),
-      { status: 200 }
-    )) as any;
+test('TC-12/G.1: TTS 代理 SSE 流式（/api/tts：voice/rate/instruction 透传 + audio.delta 播放）', async () => {
+  const pcm1 = Buffer.from([0x00, 0x01]).toString('base64');
+  const pcm2 = Buffer.from([0x02, 0x03]).toString('base64');
+  let captured: { url: string; body: any } | null = null;
+  globalThis.fetch = (async (url: string, init?: any) => {
+    captured = { url: String(url), body: JSON.parse(init?.body ?? '{}') };
+    const stream = new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(`event: delta\ndata: {"audio":"${pcm1}"}\n\n`));
+        controller.enqueue(enc.encode(`event: delta\ndata: {"audio":"${pcm2}"}\n\n`));
+        controller.enqueue(enc.encode('event: done\ndata: {}\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  }) as any;
 
   const voice = new VoiceService({ outputMode: 'stepfun-tts' });
-  const pcm = Buffer.from([0x00, 0x01, 0x02, 0x03]).toString('base64');
-
-  const speakPromise = voice.speak('我认为应该先做用户调研', {
-    voiceId: 'stepfun_voice_04',
+  await voice.speak('我认为应该先做用户调研', {
+    voiceId: 'zhengpaiqingnian',
     rate: 1.25,
     emotion: 'serious',
     instruction: '语速稍快、坚定有力',
   });
 
-  // 等待 WebSocket 建立
-  await new Promise((r) => setTimeout(r, 5));
-  const ws = MockWebSocket.instances[0];
-  assert.ok(ws, '未建立 TTS WebSocket');
-  assert.equal(ws.url, 'wss://api.stepfun.com/v1/realtime/audio');
+  assert.ok(captured, '未调用 /api/tts');
+  assert.equal(captured!.url, '/api/tts');
+  assert.equal(captured!.body.text, '我认为应该先做用户调研');
+  assert.equal(captured!.body.voice_id, 'zhengpaiqingnian');
+  assert.equal(captured!.body.rate, 1.25);
+  assert.equal(captured!.body.instruction, '语速稍快、坚定有力');
+  assert.equal(MockAudioContext.sources.length, 2, 'PCM 分片未全部入队播放');
 
-  // 会话配置 + 文本增量（含 instruction）
-  const sessionUpdate = ws.sent.find((s) => s.type === 'session.update');
-  assert.ok(sessionUpdate);
-  assert.equal(sessionUpdate.voice, 'stepfun_voice_04');
-  assert.equal(sessionUpdate.rate, 1.25);
-  const textDelta = ws.sent.find((s) => s.type === 'tts.text.delta');
-  assert.equal(textDelta.text, '我认为应该先做用户调研');
-  assert.equal(textDelta.instruction, '语速稍快、坚定有力');
-  assert.ok(ws.sent.some((s) => s.type === 'tts.text.done'));
-
-  // 音频增量 → 入队播放
-  assert.equal(voice.isSpeaking(), true);
-  ws.deliver({ type: 'tts.response.audio.delta', audio: pcm });
-  ws.deliver({ type: 'tts.response.subtitle', words: [{ text: '我认为', start: 0, end: 200 }] });
-  assert.equal(MockAudioContext.sources.length, 1, 'PCM 未入队播放');
-
-  // 完成事件 → resolve
-  ws.deliver({ type: 'tts.response.done' });
-  await speakPromise;
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(voice.isSpeaking(), false, '播完后仍在说话态');
 });
 
 test('TC-04: barge-in —— 用户抢话时同步停止播报（≤300ms）', async () => {
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ token: 'tok', endpoint: 'wss://api.stepfun.com/v1/realtime/audio', model: 'stepaudio-3-tts' }), { status: 200 })) as any;
+  globalThis.fetch = (async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(
+          enc.encode(`event: delta\ndata: {"audio":"${Buffer.alloc(48000).toString('base64')}"}\n\n`)
+        );
+        // 不关闭：模拟长播报
+      },
+    });
+    return new Response(stream, { status: 200 });
+  }) as any;
 
   const voice = new VoiceService({ outputMode: 'stepfun-tts' });
-  const speakPromise = voice.speak('我同意你的思路，补充一点样本量要足够。', { voiceId: 'stepfun_voice_02', emotion: 'neutral' });
+  const speakPromise = voice.speak('我同意你的思路，补充一点样本量要足够。', { voiceId: 'shenchennanyin', emotion: 'neutral' });
 
-  await new Promise((r) => setTimeout(r, 5));
-  const ws = MockWebSocket.instances[0];
-  ws.deliver({ type: 'tts.response.audio.delta', audio: Buffer.from([1, 2, 3, 4]).toString('base64') });
+  await new Promise((r) => setTimeout(r, 20));
   const source = MockAudioContext.sources[0];
+  assert.ok(source, 'PCM 未入队播放');
   assert.equal(source.stopped, false);
 
   // barge-in：同步生效
@@ -217,10 +220,9 @@ test('TC-04: barge-in —— 用户抢话时同步停止播报（≤300ms）', a
   voice.bargeIn();
   assert.equal(source.stopped, true, 'barge-in 未立即停止音频');
   assert.equal(voice.isSpeaking(), false);
-  assert.equal(ws.closed, true, 'barge-in 未关闭 TTS 连接');
   assert.ok(Date.now() - t0 < 300, 'barge-in 超过 300ms');
 
-  await speakPromise;
+  await speakPromise; // reader.cancel 使流正常结束，promise 不悬挂
 });
 
 test('TC-12: TTS 失败自动降级文字播报（不阻断群面）', async () => {
@@ -235,17 +237,14 @@ test('TC-12: TTS 失败自动降级文字播报（不阻断群面）', async () 
 // ---------- TC-13：ASR SSE 流式 ----------
 
 test('TC-13/G.2: ASR 录音提交 → SSE 增量 + 最终转写', async () => {
-  const asrTokenRes = { token: 'asr-tok', endpoint: 'https://api.stepfun.com/v1/audio/asr/sse', model: 'stepaudio-3-asr-max' };
   globalThis.fetch = (async (url: string) => {
-    if (String(url).includes('/api/asr-token')) {
-      return new Response(JSON.stringify(asrTokenRes), { status: 200 });
-    }
-    // ASR SSE 响应
+    assert.ok(String(url).includes('/api/asr'), '应调用 /api/asr 代理');
     const stream = new ReadableStream({
       start(controller) {
         const enc = new TextEncoder();
-        controller.enqueue(enc.encode('data: {"text": "我认为"}\n\n'));
-        controller.enqueue(enc.encode('data: {"text": "我认为应该先做用户调研"}\n\n'));
+        controller.enqueue(enc.encode('event: delta\ndata: {"delta":"我认为"}\n\n'));
+        controller.enqueue(enc.encode('event: delta\ndata: {"delta":"应该先做用户调研"}\n\n'));
+        controller.enqueue(enc.encode('event: done\ndata: {"text":"我认为应该先做用户调研"}\n\n'));
         controller.close();
       },
     });

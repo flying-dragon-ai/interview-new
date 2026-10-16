@@ -8,13 +8,13 @@ import type { RoleCard } from '../types';
  *   发言策略不重复；音色不重复；形象不重复。
  */
 
-/** StepFun 音色编号 → 音色 ID（PRD 附录 G：官方音色，每场 3 角色不重复） */
+/** StepFun 音色编号 → 官方音色 ID（platform.stepfun.com 官方音色清单，每场 3 角色不重复） */
 export const STEPFUN_VOICE_IDS: Record<string, string> = {
-  voice_01: 'stepfun_voice_01',
-  voice_02: 'stepfun_voice_02',
-  voice_03: 'stepfun_voice_03',
-  voice_04: 'stepfun_voice_04',
-  voice_05: 'stepfun_voice_05',
+  voice_01: 'zhengpaiqingnian',   // 正派青年：激情感染力、说服力（科技远见者/加密先锋/运营总监）
+  voice_02: 'shenchennanyin',     // 深沉男音：稳健权威（产品传奇/价值投资者/技术面试官）
+  voice_03: 'shuangkuainansheng', // 爽快男声：利落务实（供应链大师/行业专家）
+  voice_04: 'ganliannvsheng',     // 干练女声：高压快节奏（投行分析师/品牌总监/招聘经理）
+  voice_05: 'zhixingjiejie',      // 知性姐姐：结构化专业（战略顾问）
 };
 
 /** 原 3 角色性格文案（从 constants.ts 迁移，作为角色卡 legacy 字段保留） */

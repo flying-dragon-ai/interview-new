@@ -1,10 +1,25 @@
+import {
+  createModels,
+  createProvider,
+  envApiKeyAuth,
+  type Context,
+  type Model,
+  type MutableModels,
+  type TextContent,
+} from '@earendil-works/pi-ai';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+
 /**
- * DeepSeek 客户端（仅服务端，PRD D1 修复 + 4.1.1）
- * API Key 只从 process.env.DEEPSEEK_API_KEY 读取，前端永不持有。
+ * 统一 LLM 访问层（@earendil-works/pi-ai，PRD D1 修复 + 4.1.1）
+ * 项目内所有 LLM 调用统一经 pi-ai 的 OpenAI 兼容 provider 发出；
+ * API Key 只从 process.env.DEEPSEEK_API_KEY 读取，前端永不持有（C9）。
+ * 端点 / 模型 / 温度可用 DEEPSEEK_BASE_URL / DEEPSEEK_MODEL / DEEPSEEK_TEMPERATURE 覆盖
+ * （默认 DeepSeek 官方；任意 OpenAI 兼容端点均可，如 Kimi/Moonshot）。
  */
 
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
-const DEEPSEEK_MODEL = 'deepseek-chat';
+const PROVIDER_ID = 'unified-llm';
+const DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
+const DEFAULT_MODEL = 'deepseek-chat';
 
 function getApiKey(): string {
   const key = process.env.DEEPSEEK_API_KEY;
@@ -18,31 +33,127 @@ export function isLlmConfigured(): boolean {
   return Boolean(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY.trim());
 }
 
+/** base URL：env 允许填到 .../chat/completions，统一归一化为 /v1 根（pi-ai 自行拼接端点路径） */
+function getBaseUrl(): string {
+  const raw = (process.env.DEEPSEEK_BASE_URL && process.env.DEEPSEEK_BASE_URL.trim()) || DEFAULT_BASE_URL;
+  return raw.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+}
+
+function getModelId(): string {
+  return (process.env.DEEPSEEK_MODEL && process.env.DEEPSEEK_MODEL.trim()) || DEFAULT_MODEL;
+}
+
+/** 温度覆盖：部分模型（如 Kimi k2/k3）仅允许 temperature=1，用 DEEPSEEK_TEMPERATURE 强制统一值 */
+function getTemperature(requested: number): number {
+  const override = process.env.DEEPSEEK_TEMPERATURE;
+  if (override && override.trim()) {
+    const v = Number(override.trim());
+    if (!Number.isNaN(v)) return v;
+  }
+  return requested;
+}
+
+/** max_tokens 覆盖：推理模型（如 kimi-k3）思考链可占数千 token，默认 8192 易被吃光导致正文为空 */
+function getMaxTokens(): number {
+  const v = process.env.DEEPSEEK_MAX_TOKENS;
+  if (v && v.trim()) {
+    const n = Number(v.trim());
+    if (!Number.isNaN(n) && n > 0) return n;
+  }
+  return 8192;
+}
+
+/**
+ * 推理强度覆盖（DEEPSEEK_REASONING=low|medium|high）。
+ * Kimi 等推理模型默认思考链极长（topic 生成 4min+ 且期间无可见输出），
+ * 设 low 后约 15s；不设则按非推理模型处理（DeepSeek 官方行为不变）。
+ */
+function getReasoningLevel(): 'low' | 'medium' | 'high' | null {
+  const v = process.env.DEEPSEEK_REASONING?.trim();
+  if (v === 'low' || v === 'medium' || v === 'high') return v;
+  return null;
+}
+
+interface LlmRuntime {
+  models: MutableModels;
+  model: Model<'openai-completions'>;
+}
+
+let cached: { baseUrl: string; modelId: string; runtime: LlmRuntime } | null = null;
+
+/** 构建（并缓存）pi-ai Models 集合：单 provider + 单模型，配置完全来自 env */
+function getRuntime(): LlmRuntime {
+  const baseUrl = getBaseUrl();
+  const modelId = getModelId();
+  if (!cached || cached.baseUrl !== baseUrl || cached.modelId !== modelId) {
+    const reasoningLevel = getReasoningLevel();
+    const modelDef: Model<'openai-completions'> = {
+      id: modelId,
+      name: modelId,
+      api: 'openai-completions',
+      provider: PROVIDER_ID,
+      baseUrl,
+      reasoning: reasoningLevel !== null,
+      // pi-ai 对 Moonshot 默认不发 reasoning_effort（过于保守），显式打开
+      ...(reasoningLevel ? { compat: { supportsReasoningEffort: true } } : {}),
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 256000,
+      maxTokens: getMaxTokens(),
+    };
+    const provider = createProvider({
+      id: PROVIDER_ID,
+      name: 'Unified LLM (pi-ai)',
+      baseUrl,
+      auth: { apiKey: envApiKeyAuth('LLM API key', ['DEEPSEEK_API_KEY']) },
+      models: [modelDef],
+      api: openAICompletionsApi(),
+    });
+    const models = createModels();
+    models.setProvider(provider);
+    const model = models.getModel(PROVIDER_ID, modelId) as Model<'openai-completions'> | undefined;
+    if (!model) {
+      throw new Error(`pi-ai 模型注册失败: ${PROVIDER_ID}/${modelId}`);
+    }
+    cached = { baseUrl, modelId, runtime: { models, model } };
+  }
+  return cached.runtime;
+}
+
+function userContext(prompt: string): Context {
+  return { messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] };
+}
+
+function toError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  return new Error(`LLM API 请求失败: ${msg}`);
+}
+
 /** 非流式调用 */
 export async function callDeepSeek(prompt: string, temperature = 0.7): Promise<string> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getApiKey()}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature,
-      stream: false,
-    }),
-  });
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '未知错误');
-    throw new Error(`DeepSeek API 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
+  getApiKey(); // 未配置时快速报错
+  const { models, model } = getRuntime();
+  let msg;
+  try {
+    msg = await models.completeSimple(model, userContext(prompt), {
+      temperature: getTemperature(temperature),
+      ...(getReasoningLevel() ? { reasoning: getReasoningLevel()! } : {}),
+    });
+  } catch (err) {
+    throw toError(err);
   }
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') {
-    throw new Error('DeepSeek API 响应格式异常，未找到生成内容');
+  if (msg.errorMessage || msg.stopReason === 'error' || msg.stopReason === 'aborted') {
+    throw toError(msg.errorMessage ?? `stopReason=${msg.stopReason}`);
   }
-  return content.trim();
+  const content = msg.content
+    .filter((b): b is TextContent => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+  if (!content) {
+    throw new Error(`LLM API 响应格式异常，未找到生成内容（stopReason=${msg.stopReason}，可能 max_tokens 被推理链占满）`);
+  }
+  return content;
 }
 
 /**
@@ -56,56 +167,25 @@ export async function callDeepSeekStream(
   onDelta: (chunk: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getApiKey()}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature,
-      stream: true,
-    }),
-    signal,
-  });
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '未知错误');
-    throw new Error(`DeepSeek API 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('DeepSeek API 响应体不可读');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
+  getApiKey();
+  const { models, model } = getRuntime();
   let full = '';
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.slice(6).trim();
-          if (payload === '[DONE]') return full;
-          try {
-            const data = JSON.parse(payload);
-            const content = data.choices?.[0]?.delta?.content;
-            if (typeof content === 'string') {
-              full += content;
-              onDelta(content);
-            }
-          } catch {
-            // 忽略单条解析失败
-          }
-        }
+    const stream = models.streamSimple(model, userContext(prompt), {
+      temperature: getTemperature(temperature),
+      ...(getReasoningLevel() ? { reasoning: getReasoningLevel()! } : {}),
+      signal,
+    });
+    for await (const ev of stream) {
+      if (ev.type === 'text_delta') {
+        full += ev.delta;
+        onDelta(ev.delta);
+      } else if (ev.type === 'error') {
+        throw new Error(ev.error.errorMessage ?? `stopReason=${ev.reason}`);
       }
     }
-    return full;
-  } finally {
-    reader.releaseLock();
+  } catch (err) {
+    throw toError(err);
   }
+  return full;
 }

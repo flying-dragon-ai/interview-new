@@ -63,6 +63,16 @@ function sseRes(lines: string[]) {
   return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
+/** pi-ai 的 openai-completions 恒走流式：上游 mock 需 SSE 形态且以 finish_reason 收尾 */
+function llmSse(chunks: string[]) {
+  const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+  return sseRes([
+    ...chunks.map((c) => `data: {"choices":[{"delta":{"content":"${esc(c)}"},"finish_reason":null}]}\n\n`),
+    `data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n`,
+    'data: [DONE]\n\n',
+  ]);
+}
+
 /** 解析 SSE 写入内容为事件列表 */
 function parseSse(body: string): { event: string; data: any }[] {
   return body
@@ -84,7 +94,7 @@ afterEach(() => {
 });
 
 test('/api/llm topic：非流式生成并清理 Markdown', async () => {
-  globalThis.fetch = (async () => jsonRes({ choices: [{ message: { content: '**一、背景**\n测试题目' } }] })) as any;
+  globalThis.fetch = (async () => llmSse(['**一、背景**\n测试题目'])) as any;
   const res = mockRes();
   await handler(mockReq({ action: 'topic', payload: { company: '字节跳动', jobTitle: '产品经理' } }), res);
   assert.equal(res.statusCode, 200);
@@ -93,15 +103,7 @@ test('/api/llm topic：非流式生成并清理 Markdown', async () => {
 
 test('/api/llm reply：语音版 JSON 输出解析（content/emotion/instruction）', async () => {
   globalThis.fetch = (async () =>
-    jsonRes({
-      choices: [
-        {
-          message: {
-            content: '{"content": "我认为应该先做调研", "emotion": "serious", "target": "user", "stepfun_tts_instruction": "语速稍慢"}',
-          },
-        },
-      ],
-    })) as any;
+    llmSse(['{"content": "我认为应该先做调研", "emotion": "serious", "target": "user", "stepfun_tts_instruction": "语速稍慢"}'])) as any;
   const res = mockRes();
   await handler(
     mockReq({
@@ -118,12 +120,7 @@ test('/api/llm reply：语音版 JSON 输出解析（content/emotion/instruction
 });
 
 test('/api/llm reply 流式：SSE delta 渐进 + done 元数据', async () => {
-  globalThis.fetch = (async () =>
-    sseRes([
-      'data: {"choices":[{"delta":{"content":"{\\"content\\": \\"大家好，我"}}]}\n\n',
-      'data: {"choices":[{"delta":{"content":"认为先调研\\", \\"emotion\\": \\"neutral\\"}"}}]}\n\n',
-      'data: [DONE]\n\n',
-    ])) as any;
+  globalThis.fetch = (async () => llmSse(['{"content": "大家好，我', '认为先调研", "emotion": "neutral"}'])) as any;
   const res = mockRes();
   await handler(
     mockReq({
@@ -189,7 +186,7 @@ test('/api/llm analyze：规则引擎 + LLM 语义分合并', async () => {
 });
 
 test('/api/llm 限流：同 IP 超频 → 429（Q-N2）', async () => {
-  globalThis.fetch = (async () => jsonRes({ choices: [{ message: { content: '{}' } }] })) as any;
+  globalThis.fetch = (async () => llmSse(['{}'])) as any;
   let last: any;
   for (let i = 0; i < 61; i++) {
     const res = mockRes();

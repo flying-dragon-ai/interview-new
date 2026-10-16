@@ -234,12 +234,12 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   const stressRaw = stressQuality * 0.5 + recoveryScore * 0.3 + conflictHandling * 0.2;
   const stress = Math.round((stressRaw / 100) * 20);
 
-  // ---- 团队协作（max 10）：回应他人次数 40% / 支持补充他人 30% / 协调分歧 30%
+  // ---- 团队协作（max 15，M3 过渡权重 TRANSITION_WEIGHTS）：回应他人次数 40% / 支持补充他人 30% / 协调分歧 30%
   const respondScore = thresholdScore(m.responseCount, 3, 0);
   const supportScore = llm?.supportOthers ?? respondScore;
   const coordinateScore = llm?.coordinateOthers ?? 55;
   const teamworkRaw = respondScore * 0.4 + supportScore * 0.3 + coordinateScore * 0.3;
-  const teamwork = Math.round((teamworkRaw / 100) * 10);
+  const teamwork = Math.round((teamworkRaw / 100) * TRANSITION_WEIGHTS.teamwork);
 
   // ---- 视觉（M6 前不参与总分）
   const visual = { score: 0, max: 20, status: 'not_enabled' as const, evidence: [] as Evidence[], note: '视觉维度 M6 启用（摄像头分析未开启）' };
@@ -295,7 +295,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
       },
       teamwork: {
         score: teamwork,
-        max: 10,
+        max: TRANSITION_WEIGHTS.teamwork,
         evidence: teamworkEvidence,
         metrics: {
           回应他人次数: m.responseCount,
@@ -321,7 +321,7 @@ export function buildSuggestions(scores: {
   if (content < 24) tips.push('发言使用"首先/其次/最后"结构化表达，让观点更清晰');
   if (voice < 15 && m.fillerRatio >= 3) tips.push(`减少口头填充词（当前约 ${m.fillerRatio}% 的字数含"嗯/那个"等）`);
   if (stress < 12 && m.interruptedCount > 0) tips.push('被质疑或打断后，先确认对方观点再回应，争取 3 秒内恢复');
-  if (teamwork < 6) tips.push('多回应他人观点（同意并推进/质疑后给方案），目标每场回应 ≥3 次');
+  if (teamwork < 9) tips.push('多回应他人观点（同意并推进/质疑后给方案），目标每场回应 ≥3 次');
   if (tips.length === 0) tips.push('表现均衡，尝试在总结阶段主动承担汇报，展示领导力');
   return tips.slice(0, 5);
 }

@@ -123,20 +123,23 @@ export default async function handler(request: VercelRequest, response: VercelRe
         response.on?.('close', () => controller.abort());
         let full = '';
         let sentLen = 0;
+        let acc = '';
         try {
           full = await callDeepSeekStream(
             prompt,
             0.8,
-            () => {
+            (chunk) => {
               // 边收边提取 content 字段增量（JSON 输出时的渐进显示）
-              const value = extractJsonStringField(full, 'content');
+              // 注意：不能读外层 full——其在流结束后才赋值；必须本地累积 chunk
+              acc += chunk;
+              const value = extractJsonStringField(acc, 'content');
               if (value !== null && value.length > sentLen) {
                 sse.send('delta', { delta: value.slice(sentLen) });
                 sentLen = value.length;
-              } else if (extractJsonStringField(full, 'content') === null && full.trim() && !full.trim().startsWith('{')) {
+              } else if (value === null && acc.trim() && !acc.trim().startsWith('{')) {
                 // 非 JSON 输出（文字版兜底）：直接透传增量
-                sse.send('delta', { delta: full.slice(sentLen) });
-                sentLen = full.length;
+                sse.send('delta', { delta: acc.slice(sentLen) });
+                sentLen = acc.length;
               }
             },
             controller.signal

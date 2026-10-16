@@ -34,7 +34,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
   const caps = voiceCaps ?? detectCapabilities();
   const inputLabel =
     caps.inputMode === 'stepfun-asr' ? 'StepFun ASR' : caps.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）';
-  const outputLabel = caps.outputMode === 'stepfun-tts' ? 'StepFun TTS' : '纯文字（降级）';
+  const outputLabel = caps.outputMode === 'stepfun-tts' ? 'StepFun TTS' : caps.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）';
 
   return (
     <div className="flex flex-col h-full min-h-0">
