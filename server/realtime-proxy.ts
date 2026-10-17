@@ -11,6 +11,47 @@ import { verifyToken, STEPFUN_CONFIG } from '../api/_lib/stepfun.ts';
  * - 挂载方：vite dev（server/local-api.ts）；CN 独立 node 部署可复用本模块
  */
 
+/** ws 合法可发送的关闭码（1005/1006 是协议保留值，发送即 TypeError，见 ws/lib/sender.js） */
+function isValidCloseCode(code: unknown): code is number {
+  return (
+    typeof code === 'number' &&
+    Number.isInteger(code) &&
+    ((code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
+      (code >= 3000 && code <= 4999))
+  );
+}
+
+/**
+ * 消毒上游 close 帧再转发给客户端。
+ * 背景（fix bug）：上游 TLS 异常断开时 ws 的 'close' 事件 code=1006（保留值），
+ * 原样 client.close(1006) 触发 ws TypeError 且无人捕获 → 整个 dev server 退出。
+ * 非法 code 一律映射 1011（上游异常）；reason 非 Buffer/字符串或超 123 字节则丢弃。
+ */
+export function sanitizeCloseFrame(
+  code: unknown,
+  reason: unknown
+): { code: number | undefined; reason: Buffer | string | undefined } {
+  const safeCode = isValidCloseCode(code) ? code : 1011;
+  if (typeof reason === 'string') {
+    return { code: safeCode, reason: Buffer.byteLength(reason) <= 123 ? reason : undefined };
+  }
+  if (Buffer.isBuffer(reason)) {
+    return { code: safeCode, reason: reason.length <= 123 ? reason : undefined };
+  }
+  return { code: safeCode, reason: undefined };
+}
+
+/** 事件处理器防爆：WS 回调里抛异常会无人捕获直接杀死进程（fix bug 回归护栏） */
+function safeHandler(fn: (...args: any[]) => void): (...args: any[]) => void {
+  return (...args: any[]) => {
+    try {
+      fn(...args);
+    } catch (err) {
+      console.error('[realtime-proxy] handler error:', err);
+    }
+  };
+}
+
 const wss = new WebSocketServer({ noServer: true });
 
 export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -37,23 +78,52 @@ export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head
 
   wss.handleUpgrade(req, socket, head, (client) => {
     // 上游 → 客户端
-    upstream.on('message', (data, isBinary) => {
-      if (client.readyState === client.OPEN) client.send(data, { binary: isBinary });
-    });
-    upstream.on('close', (code, reason) => client.close(code, reason));
-    upstream.on('error', () => client.close(1011, 'upstream error'));
+    upstream.on(
+      'message',
+      safeHandler((data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
+        if (client.readyState === client.OPEN) client.send(data as any, { binary: isBinary });
+      })
+    );
+    // fix bug：上游 close 的 code 可能是 1006 等保留值，原样转发会抛 TypeError 杀死进程；
+    // 先经 sanitizeCloseFrame 消毒，且处理器包 safeHandler 防爆
+    upstream.on(
+      'close',
+      safeHandler((code: unknown, reason: unknown) => {
+        if (client.readyState !== client.OPEN && client.readyState !== client.CLOSING) return;
+        const frame = sanitizeCloseFrame(code, reason);
+        client.close(frame.code, frame.reason);
+      })
+    );
+    upstream.on(
+      'error',
+      safeHandler(() => {
+        if (client.readyState === client.OPEN) client.close(1011, 'upstream error');
+      })
+    );
 
     // 客户端 → 上游（缓冲到上游 open，避免建连竞态丢帧）
     const pending: (string | Buffer)[] = [];
-    upstream.on('open', () => {
-      while (pending.length > 0) upstream.send(pending.shift()!);
-    });
-    client.on('message', (data: Buffer | string) => {
-      if (upstream.readyState === UpstreamWebSocket.OPEN) upstream.send(data);
-      else pending.push(data);
-    });
-    client.on('close', () => upstream.close());
-    client.on('error', () => upstream.close());
+    upstream.on(
+      'open',
+      safeHandler(() => {
+        while (pending.length > 0) upstream.send(pending.shift()!);
+      })
+    );
+    client.on(
+      'message',
+      safeHandler((data: Buffer | string) => {
+        if (upstream.readyState === UpstreamWebSocket.OPEN) upstream.send(data);
+        else pending.push(data);
+      })
+    );
+    client.on(
+      'close',
+      safeHandler(() => upstream.close())
+    );
+    client.on(
+      'error',
+      safeHandler(() => upstream.close())
+    );
   });
 }
 
