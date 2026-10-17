@@ -73,6 +73,13 @@ test('TC-10: 网络检测与跳过摄像头（DeviceCheck）', () => {
   assert.ok(/省电|前台|横屏/.test(dc), '缺少移动端专项提示');
 });
 
+test('US-01: 用户可不请求麦克风权限直接选择纯文字练习', () => {
+  const dc = read('components/DeviceCheck.tsx');
+  assert.ok(/使用纯文字练习/.test(dc), '缺少纯文字模式入口');
+  assert.ok(/setMicStatus\('skipped'\)/.test(dc), '纯文字模式未更新设备状态');
+  assert.ok(/voiceEnabled: micStatus === 'passed'/.test(dc), '跳过麦克风后仍会启用语音');
+});
+
 test('US-13: SetupForm 12 角色卡选择 + 约束校验', () => {
   const form = read('components/SetupForm.tsx');
   assert.ok(/autoSelectRolesForTopic/.test(form), '缺少按题型自动分配');

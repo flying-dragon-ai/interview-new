@@ -52,6 +52,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
 
@@ -90,6 +91,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       audioCtxRef.current?.close().catch(() => undefined);
     };
@@ -97,9 +99,11 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
 
   const startMicCheck = async () => {
     setMicStatus('checking');
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      micStreamRef.current = stream;
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const analyser = ctx.createAnalyser();
@@ -117,6 +121,16 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
     } catch {
       setMicStatus('failed');
     }
+  };
+
+  const skipMicCheck = () => {
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    audioCtxRef.current?.close().catch(() => undefined);
+    audioCtxRef.current = null;
+    setMicLevel(0);
+    setMicStatus('skipped');
   };
 
   const startCameraCheck = async (mode: 'user' | 'environment' = facingMode) => {
@@ -169,7 +183,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
     setCameraEnabled(false);
   };
 
-  const micReady = micStatus === 'passed' || micStatus === 'failed'; // 失败也可继续（纯文字）
+  const micReady = micStatus === 'passed' || micStatus === 'failed' || micStatus === 'skipped';
   const canEnter = micReady && (cameraStatus !== 'pending' || !cameraEnabled);
 
   const statusIcon = (s: CheckStatus) =>
@@ -188,7 +202,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
           <div>
             <div className="font-semibold text-slate-800">🎤 麦克风 {statusIcon(micStatus)}</div>
             <div className="text-xs text-slate-500 mt-1">
-              {micStatus === 'failed' ? '未获得麦克风权限，将使用纯文字模式' : '检测权限与输入音量'}
+              {micStatus === 'failed' ? '麦克风不可用，将使用纯文字模式' : micStatus === 'skipped' ? '已选择纯文字练习，不请求麦克风权限' : '检测权限与输入音量'}
             </div>
             {micStatus === 'passed' && (
               <div className="mt-2 h-2 w-48 bg-slate-100 rounded-full overflow-hidden">
@@ -196,13 +210,22 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
               </div>
             )}
           </div>
-          <button
-            onClick={startMicCheck}
-            disabled={micStatus === 'checking' || micStatus === 'passed'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
-          >
-            {micStatus === 'passed' ? '已通过' : '开始检测'}
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={startMicCheck}
+              disabled={micStatus === 'checking' || micStatus === 'passed'}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+            >
+              {micStatus === 'passed' ? '已通过' : '开始检测'}
+            </button>
+            <button
+              onClick={skipMicCheck}
+              disabled={micStatus === 'checking' || micStatus === 'skipped'}
+              className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium hover:bg-slate-200 disabled:opacity-40"
+            >
+              使用纯文字练习
+            </button>
+          </div>
         </div>
 
         {/* 摄像头 */}
@@ -301,7 +324,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
           </button>
           <button
             onClick={() =>
-              onReady({ cameraEnabled: cameraEnabled && cameraStatus === 'passed', voiceEnabled: micStatus !== 'failed', facingMode, consentSaveTranscript: consent })
+              onReady({ cameraEnabled: cameraEnabled && cameraStatus === 'passed', voiceEnabled: micStatus === 'passed', facingMode, consentSaveTranscript: consent })
             }
             disabled={!canEnter}
             className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-40"
