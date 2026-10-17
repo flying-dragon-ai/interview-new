@@ -65,7 +65,7 @@ pnpm contracts:deploy:testnet
 | Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待使用用户授权的钱包会话部署 |
 | GitHub 仓库 | [interview-new](https://github.com/llingqi77-tech/interview-new)；本次 MVP 在 `codex/monad-blitz-mvp` 分支 |
 | 合约验证 / 交易链接 | 部署后写入本节 |
-| 演示流程 | `docs/DEMO_SCRIPT.md` |
+| 演示流程 | [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md) |
 | 项目截图 | 现存 `screenshots/homepage.jpg` 是旧版页面，不代表当前 MVP；需替换后再作为参赛截图 |
 
 Preview 地址受 Vercel 项目保护；公开比赛演示仍需在确认访问策略后部署或开放。README 不填入虚构的合约地址或交易链接。
