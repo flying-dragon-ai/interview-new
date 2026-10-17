@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { GameEvent, Message, ReportV15 } from '../../types';
 import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../../engine/reportEngine.ts';
+import { summarizeVisual } from '../../engine/visionMetrics.ts';
 import { callDeepSeek } from './llm.ts';
 import { buildAnalysisPrompt } from './prompts.ts';
 import { safeJsonParse } from './jsonStream.ts';
@@ -40,6 +41,17 @@ export async function analyzeSession(
     eventRows = res.rows;
   } catch {
     eventRows = [];
+  }
+  // 视觉聚合特征（M6）：表不存在/空表时容忍，视觉维度自动 not_enabled
+  let visualRows: any[] = [];
+  try {
+    const res = await pool.query(
+      'SELECT timestamp_ms, eye_contact, emotion, head_pose, engagement FROM visual_features WHERE session_id = $1 ORDER BY timestamp_ms ASC',
+      [sessionId]
+    );
+    visualRows = res.rows;
+  } catch {
+    visualRows = [];
   }
 
   const sessionStartAt = session?.started_at ? new Date(session.started_at).getTime() : Date.now();
@@ -102,7 +114,8 @@ export async function analyzeSession(
     }
   }
 
-  const report = buildRuleReport(input, llm);
+  const visualStats = visualRows.length > 0 ? summarizeVisual(visualRows) : undefined;
+  const report = buildRuleReport(input, llm, visualStats);
   report.session_id = sessionId;
 
   let persisted = false;
@@ -119,6 +132,7 @@ export async function analyzeSession(
             ...report.dimensions.content.evidence,
             ...report.dimensions.stress.evidence,
             ...report.dimensions.teamwork.evidence,
+            ...report.dimensions.visual.evidence,
           ]),
           JSON.stringify(report.suggestions),
         ]

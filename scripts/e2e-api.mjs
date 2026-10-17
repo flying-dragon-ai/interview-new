@@ -5,7 +5,7 @@
  * 覆盖：
  *  1. 静态入口（/ 与 /app.html）
  *  2. GET /api/avatars/presets（≥8 预设、≥4 行业）
- *  3. POST /api/tts-token / /api/asr-token（配置探针）
+ *  3. POST /api/tts-token / /api/asr-token / /api/realtime-token（配置探针）
  *  4. 持久层降级契约（无 DATABASE_URL → 503 DATABASE_NOT_CONFIGURED）
  *  5. 全场模拟群面：topic(流式) → 3 角色 reply（含流式/非流式/voiceMode/用户回应）→ analyze(v1.5) → feedback(旧版)
  *  6. TTS 三音色出声 + ASR 语音回环（TTS 产物喂回 ASR，转写须命中原文）
@@ -88,7 +88,7 @@ try {
 }
 
 // ---------- 3. 凭证探针 ----------
-for (const ep of ['tts-token', 'asr-token']) {
+for (const ep of ['tts-token', 'asr-token', 'realtime-token']) {
   try {
     const { r: res, ms } = await timed(() => postJson(`/api/${ep}`, {}));
     const data = await res.json();

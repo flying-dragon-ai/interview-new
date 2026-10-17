@@ -143,6 +143,8 @@ export class VoiceService {
   private audioCtx: AudioContext | null = null;
   private audioQueue: AudioBufferSourceNode[] = [];
   private nextStartTime = 0;
+  /** M7 P3：播放分析器（口型/灯光律动；懒创建，插入播放链 source → analyser → destination） */
+  private playbackAnalyser: AnalyserNode | null = null;
   // Web Speech TTS 兜底
   private utterance: SpeechSynthesisUtterance | null = null;
   private speaking = false;
@@ -438,7 +440,7 @@ export class VoiceService {
       for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(this.audioCtx.destination);
+      source.connect(this.playbackAnalyser ?? this.audioCtx.destination);
       const startAt = Math.max(this.audioCtx.currentTime, this.nextStartTime);
       source.start(startAt);
       this.nextStartTime = startAt + buffer.duration;
@@ -491,6 +493,25 @@ export class VoiceService {
   /** barge-in v1：立即停止播报（TC-04：300ms 内停止） */
   bargeIn(): void {
     this.stopPlayback();
+  }
+
+  /**
+   * M7 P3：TTS 播放分析器（口型/灯光律动用）。
+   * 懒创建并接入播放链（source → analyser → destination）；不改动既有播放路径与公开 API。
+   */
+  getPlaybackAnalyser(): AnalyserNode | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      this.audioCtx = this.audioCtx ?? new AudioContext();
+      if (!this.playbackAnalyser) {
+        this.playbackAnalyser = this.audioCtx.createAnalyser();
+        this.playbackAnalyser.fftSize = 1024;
+        this.playbackAnalyser.connect(this.audioCtx.destination);
+      }
+      return this.playbackAnalyser;
+    } catch {
+      return null;
+    }
   }
 
   private stopPlayback(): void {

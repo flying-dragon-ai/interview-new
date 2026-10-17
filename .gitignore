@@ -79,3 +79,17 @@ temp/
 Thumbs.db
 desktop.ini
 ehthumbs.db
+
+# ============================================================
+# Monad 链上组件（contracts/ + indexer/）
+# ============================================================
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+# forge 依赖库体积大可重现（git clone --depth 1，见 docs/monad-onchain.md），不入库
+contracts/lib/
+# Envio HyperIndex 生成物
+indexer/node_modules/
+indexer/generated/
+indexer/.envio/
+indexer/.env

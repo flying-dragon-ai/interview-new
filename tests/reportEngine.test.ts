@@ -8,6 +8,8 @@ import {
   type ReportInput,
 } from '../engine/reportEngine.ts';
 import type { GameEvent, Message } from '../types.ts';
+import { FINAL_WEIGHTS, TRANSITION_WEIGHTS } from '../engine/reportEngine.ts';
+import { summarizeVisual } from '../engine/visionMetrics.ts';
 
 const SESSION_START = 1_000_000;
 
@@ -85,6 +87,84 @@ test('报告 v1.5：维度满分与过渡权重（内容40/语音25/抗压20/协
   assert.ok(report.dimensions.content.evidence.length > 0);
 });
 
+// ---------- M6 视觉维度 ----------
+
+/** 造 N 秒视觉聚合行（默认良好表现） */
+function visualRows(
+  count: number,
+  overrides: (i: number) => Partial<import('../types').VisualFeatureRow> = () => ({})
+): import('../types').VisualFeatureRow[] {
+  return Array.from({ length: count }, (_, i) => ({
+    timestamp_ms: i * 1000,
+    eye_contact: 0.85,
+    emotion: 'neutral' as const,
+    head_pose: { pitch: 0, yaw: 0, roll: 0 },
+    engagement: 1,
+    ...overrides(i),
+  }));
+}
+
+test('M6: 视觉数据充足 → 维度 enabled、满分 20、综合分按 FINAL_WEIGHTS', () => {
+  const stats = summarizeVisual(visualRows(45));
+  const report = buildRuleReport(input, undefined, stats);
+
+  const dims = report.dimensions;
+  assert.equal(dims.visual.status, 'enabled');
+  assert.equal(dims.visual.max, FINAL_WEIGHTS.visual);
+  assert.equal(dims.visual.score, Math.round((stats.rawScore / 100) * FINAL_WEIGHTS.visual));
+  // 权重整体切换到 FINAL_WEIGHTS（视觉 20%，其余四维 ×0.8）
+  assert.equal(dims.content.max, FINAL_WEIGHTS.content);
+  assert.equal(dims.voice.max, FINAL_WEIGHTS.voice);
+  assert.equal(dims.stress.max, FINAL_WEIGHTS.stress);
+  assert.equal(dims.teamwork.max, FINAL_WEIGHTS.teamwork);
+  const sum =
+    dims.content.score + dims.voice.score + dims.visual.score + dims.stress.score + dims.teamwork.score;
+  assert.ok(sum <= 100 && Math.abs(sum - report.overall_score) <= 5, `维度分和 ${sum} 与总分 ${report.overall_score} 不一致`);
+  // metrics 徽章齐全
+  for (const key of ['眼神接触', '紧张占比', '低头偏头占比', '面部检测率', '有效采样秒数']) {
+    assert.ok(key in (dims.visual.metrics ?? {}), `视觉 metrics 缺少 ${key}`);
+  }
+  assert.equal(dims.visual.metrics!['有效采样秒数'], 45);
+  assert.equal(dims.visual.note, undefined);
+});
+
+test('M6: 视觉表现好 → 总分高于同场未开视觉（过渡权重）', () => {
+  const withoutVisual = buildRuleReport(input);
+  const withVisual = buildRuleReport(input, undefined, summarizeVisual(visualRows(60)));
+  assert.equal(withVisual.dimensions.visual.status, 'enabled');
+  assert.equal(withVisual.dimensions.visual.score, 20);
+  // 视觉满分时总分应不低于关闭视觉的路径（其余四维按 ×0.8 缩放后仍有空间）
+  assert.ok(withVisual.overall_score >= withoutVisual.overall_score);
+});
+
+test('M6: 视觉数据不足（<30 秒）→ not_enabled + 过渡权重不变', () => {
+  const report = buildRuleReport(input, undefined, summarizeVisual(visualRows(12)));
+  assert.equal(report.dimensions.visual.status, 'not_enabled');
+  assert.equal(report.dimensions.visual.score, 0);
+  assert.equal(report.dimensions.content.max, TRANSITION_WEIGHTS.content);
+  assert.equal(report.dimensions.voice.max, TRANSITION_WEIGHTS.voice);
+  assert.equal(report.dimensions.stress.max, TRANSITION_WEIGHTS.stress);
+  assert.equal(report.dimensions.teamwork.max, TRANSITION_WEIGHTS.teamwork);
+  assert.ok(report.dimensions.visual.note?.includes('视觉数据不足'));
+});
+
+test('M6: 偏离段生成视觉证据（画面来源）+ 对应改进建议', () => {
+  const stats = summarizeVisual(
+    visualRows(40, (i) => (i < 15 ? { eye_contact: 0.1, head_pose: { pitch: -30, yaw: 0, roll: 0 } } : {}))
+  );
+  const report = buildRuleReport(input, undefined, stats);
+  const evidence = report.dimensions.visual.evidence;
+  assert.ok(evidence.length > 0, '应有视觉偏离段证据');
+  for (const ev of evidence) {
+    assert.equal(ev.modality, 'visual');
+    assert.equal(ev.dimension_hint, 'visual');
+    assert.match(ev.content, /^\d{2}:\d{2} 起持续 \d+ 秒/);
+  }
+  // 眼神接触不足 → 追加视觉建议
+  assert.ok(report.suggestions.some((s) => s.includes('摄像头')), '缺少眼神接触建议');
+  assert.ok(report.suggestions.some((s) => s.includes('低头')), '缺少低头/偏头建议');
+  assert.ok(report.suggestions.length <= 6);
+});
 test('报告 v1.5：LLM 语义分注入后内容分采用 LLM 结构分', () => {
   const ruleOnly = buildRuleReport(input);
   const withLlm = buildRuleReport(input, { structureScore: 100, responseQuality: 100, stressResponseQuality: 100, conflictHandling: 100, supportOthers: 100, coordinateOthers: 100 });

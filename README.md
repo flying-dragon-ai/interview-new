@@ -68,6 +68,7 @@ psql "$DATABASE_URL" -f db/migration-v0.7.sql
 | GET/DELETE | `/api/sessions/{id}` | 会话详情 / 删除（隐私，TC-11） |
 | POST | `/api/sessions/{id}/analyze` | 触发面后分析（规则引擎 + LLM） |
 | GET | `/api/sessions/{id}/report` | 报告 v1.5 |
+| POST/GET | `/api/sessions/{id}/visual` | 视觉聚合特征批量入库 / 查询（每秒一条，M6） |
 | GET/DELETE | `/api/avatars/presets` · `/api/avatars?id=` | 预设形象 / 删除上传形象 |
 
 ### 验证与质量门
@@ -80,7 +81,19 @@ pnpm check:bundle    # TC-00：构建产物无任何 key/凭据
 
 逐项测试审计报告见 [docs/test-audit.md](docs/test-audit.md)（附录 H 的 TC-00~TC-15、C1~C10、8.2、US-01~16 全覆盖）。
 
-P1/P2（LiveKit 实时房间、MediaPipe 视觉、viseme 口型、报告追问等）按 PRD §4.2/§4.3 排期，不在本期范围。
+### M6 视觉维度（摄像头本地分析）
+
+摄像头画面在**浏览器本地**用 MediaPipe Face Landmarker 推理（`@mediapipe/tasks-vision@1.1.1`，Web Worker 内运行），
+只把每秒一条的聚合特征（眼神接触 / 情绪 / 头部姿态 / 参与度）写入 `visual_features`，**原始视频 0 字节上传**（PRD C3/C4）。
+
+- 模型与 wasm 随站点同源分发，不进 JS bundle：`public/vision/face_landmarker.task` + `public/vision/wasm/*`
+  （从 `node_modules/@mediapipe/tasks-vision/wasm` 拷贝，版本 1.1.1；升级依赖时需同步刷新这两个目录）
+- 采样帧率：桌面 4fps / 移动端（或 ≤4 核）2fps，聚合固定 1Hz；标签页隐藏时暂停采样
+- 评分：眼神接触 40% / 情绪稳定性 30% / 头部姿态 20% / 参与度 10%，维度满分 20%，计入综合分
+  （权重常量集中在 `engine/reportEngine.ts` 的 `FINAL_WEIGHTS`；摄像头关闭/数据不足 <30 秒时走 `TRANSITION_WEIGHTS`，视觉维度显示「未开启」）
+- 面试中静默采集，不做任何实时提示；结果只在面后报告呈现
+
+其余 P1/P2（LiveKit 实时房间、viseme 口型、报告追问等）按 PRD §4.2/§4.3 排期，不在本期范围。
 ---
 
 ## 📸 产品首页

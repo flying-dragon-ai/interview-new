@@ -1,6 +1,7 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from 'vite';
+import { handleRealtimeUpgrade, isRealtimeUpgradePath } from './realtime-proxy.ts';
 
 /**
  * 本地开发 API 中间件（修复：vite dev 下 /api/* 404 → 前端"题目生成失败"）
@@ -20,6 +21,7 @@ const STATIC_ROUTES: Record<string, string> = {
   '/api/asr': '/api/asr.ts',
   '/api/tts-token': '/api/tts-token.ts',
   '/api/asr-token': '/api/asr-token.ts',
+  '/api/realtime-token': '/api/realtime-token.ts',
 };
 
 /** Vercel 文件系统路由：[id] 动态段 → query.id */
@@ -27,6 +29,7 @@ const DYNAMIC_ROUTES: { re: RegExp; file: string }[] = [
   { re: /^\/api\/sessions\/(\d+)\/analyze$/, file: '/api/sessions/[id]/analyze.ts' },
   { re: /^\/api\/sessions\/(\d+)\/report$/, file: '/api/sessions/[id]/report.ts' },
   { re: /^\/api\/sessions\/(\d+)$/, file: '/api/sessions/[id]/index.ts' },
+  { re: /^\/api\/sessions\/(\d+)\/visual$/, file: '/api/sessions/[id]/visual.ts' },
 ];
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -117,6 +120,12 @@ export function localApiPlugin(mode: string): Plugin {
             }
           }
         })().catch(next);
+      });
+
+      // M7：StepFun Realtime WS 代理（/api/realtime upgrade → 上游，见 server/realtime-proxy.ts）
+      server.httpServer?.on('upgrade', (req, socket, head) => {
+        if (!isRealtimeUpgradePath(req.url)) return; // 其余 upgrade（HMR 等）交还 vite
+        handleRealtimeUpgrade(req, socket, head);
       });
     },
   };

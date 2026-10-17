@@ -9,6 +9,7 @@ import avatarsHandler from '../api/avatars.ts';
 import sessionItemHandler from '../api/sessions/[id]/index.ts';
 import reportHandler from '../api/sessions/[id]/report.ts';
 import analyzeHandler from '../api/sessions/[id]/analyze.ts';
+import visualHandler from '../api/sessions/[id]/visual.ts';
 
 /**
  * 数据库端点测试（mock pg.Pool，验证 PRD D.2/E.1/E.2/TC-11）
@@ -339,6 +340,117 @@ test('7.6: POST /api/sessions/{id}/analyze 读 transcripts+events → 规则+LLM
   assert.ok(report.dimensions.content.score > 0);
   assert.ok(recorded.some((r) => /INSERT INTO reports/.test(r.sql)), '报告未落库');
 });
+// ---------- D.4：visual_features 批量入库 ----------
+
+test('D.4: POST /api/sessions/{id}/visual 批量写入 visual_features（6 列参数化）', async () => {
+  const { pool, recorded } = mockPool(() => ({ rows: [] }));
+  setPoolForTesting(pool);
+  const res = mockRes();
+  await visualHandler(
+    mockReq({
+      session_id: 12,
+      rows: [
+        { timestamp_ms: 1000, eye_contact: 0.75, emotion: 'neutral', head_pose: { pitch: -3.2, yaw: 1.1, roll: 0 }, engagement: 1 },
+        { timestamp_ms: 2000, eye_contact: 0.5, emotion: 'nervous', head_pose: { pitch: -20, yaw: 0, roll: 2 }, engagement: 0.5 },
+        { timestamp_ms: 3000, eye_contact: 9, emotion: 'bogus', head_pose: null, engagement: -1 }, // 越界/非法值被收敛
+      ],
+    }, { id: '12' }),
+    res
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(res.body).inserted, 3);
+  const ins = recorded.find((r) => /INSERT INTO visual_features/.test(r.sql));
+  assert.ok(ins, '未写入 visual_features 表');
+  // 6 列（含 session_id）× 3 行 = 18 个占位符
+  assert.equal((ins!.sql.match(/\$\d+/g) ?? []).length, 18);
+  assert.ok(ins!.params.includes(12), 'session_id 未写入');
+  assert.ok(ins!.params.includes('nervous'));
+  // 越界值收敛：eye_contact 9 → 1、engagement -1 → 0、非法情绪 → neutral、head_pose null → 0 姿态
+  assert.ok(ins!.params.includes(1) && ins!.params.includes(0));
+  assert.equal(ins!.params.filter((p) => p === 'neutral').length, 2);
+});
+
+test('D.4: GET /api/sessions/{id}/visual 按时间排序返回聚合行', async () => {
+  const { pool, recorded } = mockPool(() => ({ rows: [{ timestamp_ms: 1000, eye_contact: 0.8, emotion: 'neutral' }] }));
+  setPoolForTesting(pool);
+  const res = mockRes();
+  await visualHandler({ method: 'GET', query: { id: '12' }, headers: {}, socket: {} } as any, res);
+  assert.equal(res.statusCode, 200);
+  assert.ok(recorded[0].sql.includes('ORDER BY timestamp_ms ASC'));
+  assert.equal(JSON.parse(res.body)[0].eye_contact, 0.8);
+});
+
+test('D.4: POST visual rows 为空 → 400；视觉维度不阻断面试', async () => {
+  const { pool } = mockPool(() => ({ rows: [] }));
+  setPoolForTesting(pool);
+  const res = mockRes();
+  await visualHandler(mockReq({ session_id: 12, rows: [] }, { id: '12' }), res);
+  assert.equal(res.statusCode, 400);
+});
+
+test('7.6: analyze 读 visual_features → 视觉维度 enabled', async () => {
+  const { pool, recorded } = mockPool((sql) => {
+    if (/SELECT \* FROM sessions/.test(sql)) {
+      return { rows: [{ id: 8, topic: '群面题目', started_at: new Date(0), ended_at: new Date(20 * 60 * 1000) }] };
+    }
+    if (/FROM transcripts/.test(sql)) {
+      return { rows: [{ id: 1, speaker: 'user', speaker_name: '陈明', message: '首先我认为应该先做用户调研', created_at: new Date(30_000), start_ms: 30_000, end_ms: 38_000 }] };
+    }
+    if (/FROM visual_features/.test(sql)) {
+      return {
+        rows: Array.from({ length: 40 }, (_, i) => ({
+          timestamp_ms: i * 1000,
+          eye_contact: 0.9,
+          emotion: 'neutral',
+          head_pose: { pitch: 0, yaw: 0, roll: 0 },
+          engagement: 1,
+        })),
+      };
+    }
+    return { rows: [] };
+  });
+  setPoolForTesting(pool);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [{ message: { content: '{"structure_score": 88, "response_quality": 80, "stress_response_quality": 75, "conflict_handling": 70, "support_others": 80, "coordinate_others": 72}' } }],
+      }),
+      { status: 200 }
+    )) as any;
+  process.env.DEEPSEEK_API_KEY = 'test-key';
+
+  const res = mockRes();
+  await analyzeHandler({ method: 'POST', query: { id: '8' }, headers: {}, socket: {} } as any, res);
+  globalThis.fetch = originalFetch;
+
+  assert.equal(res.statusCode, 200);
+  const report = JSON.parse(res.body);
+  assert.ok(recorded.some((r) => /FROM visual_features/.test(r.sql)), '未读取 visual_features');
+  assert.equal(report.dimensions.visual.status, 'enabled');
+  assert.equal(report.dimensions.visual.max, 20);
+  assert.ok(report.dimensions.visual.score > 0);
+});
+
+test('7.6: visual_features 表缺失时容忍 → 视觉 not_enabled（不阻断分析）', async () => {
+  const { pool } = mockPool((sql) => {
+    if (/SELECT \* FROM sessions/.test(sql)) {
+      return { rows: [{ id: 8, topic: '题目', started_at: new Date(0), ended_at: new Date(20 * 60 * 1000) }] };
+    }
+    if (/FROM visual_features/.test(sql)) throw new Error('relation "visual_features" does not exist');
+    return { rows: [] };
+  });
+  setPoolForTesting(pool);
+
+  const res = mockRes();
+  await analyzeHandler({ method: 'POST', query: { id: '8' }, headers: {}, socket: {} } as any, res);
+  assert.equal(res.statusCode, 200);
+  const report = JSON.parse(res.body);
+  assert.equal(report.dimensions.visual.status, 'not_enabled');
+  assert.equal(report.dimensions.visual.score, 0);
+});
+
 
 // ---------- 未配置数据库时 503 不崩溃 ----------
 

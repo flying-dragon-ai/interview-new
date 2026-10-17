@@ -58,6 +58,6 @@ para doctor        # 集成体检（报 0 错误为准）
 
 ## 备注
 
-- gas 差异（skill gas/）：Monad 按 gas_limit 计费而非 gas_used。本期无合约交易，仅钱包连接/签名（零 gas）；后续若上链（报告存证等）须显式设置 gas limit。
+- gas 差异（skill gas/）：Monad 按 gas_limit 计费而非 gas_used。钱包连接/签名零 gas；链上证书（报告存证，InterviewCertificate）已落地，gas limit 策略与部署全流程见 `docs/monad-onchain.md`。
 - Para `wallets` / `oAuthMethods` 等字段在 SDK 3.x 标记为 deprecated（转向开发者门户配置），当前版本仍生效；`para doctor` 会提示时按门户方式调整即可。
-- 未引入 indexer：本期无链上事件可读，前端也无 `eth_call` 需求；若后续加报告链上存证再按 `indexer/` skill 评估。
+- 链上存证与索引器：已由 `contracts/`（soulbound 证书合约）+ `indexer/`（Envio HyperIndex runbook）落地，见 `docs/monad-onchain.md`。

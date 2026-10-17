@@ -1,13 +1,22 @@
-import type { Evidence, GameEvent, Message, ReportV15 } from '../types';
+import type { Evidence, GameEvent, Message, ReportV15, VisualStats } from '../types';
+import { isVisualDataSufficient, scoreVisual, visualMetrics, VISUAL_FULL, VISUAL_MIN_ROWS } from './visionMetrics.ts';
 
 /**
  * 面后报告 v1.5 规则引擎（PRD 4.1.7 / 7.4 / 附录 C）
  * - 规则引擎实算：话语权占比、发言时长分布、被打断次数、回应次数、恢复速度
  * - LLM 处理语义维度（结构贡献、冲突处理、团队协调）——由 /api/analyze 注入
- * - M3 过渡权重（视觉 M6 前不参与）：内容 40 / 语音 25 / 抗压 20 / 协作 15
+ * - 视觉维度（M6）：摄像头开启且数据充足（≥30 秒）时按 FINAL_WEIGHTS 计入综合分；
+ *   否则走 M3 过渡权重 TRANSITION_WEIGHTS（视觉 not_enabled，现状不变）
  */
 
-export const TRANSITION_WEIGHTS = { content: 40, voice: 25, stress: 20, teamwork: 15 } as const;
+/** 视觉未开启/数据不足时的过渡权重（M3：内容 40 / 语音 25 / 抗压 20 / 协作 15） */
+export const TRANSITION_WEIGHTS = { content: 40, voice: 25, visual: 0, stress: 20, teamwork: 15 } as const;
+
+/**
+ * 视觉维度启用时的综合分权重（PRD C.1 默认 15%，操作员指定 20%，其余四维按相对比例 ×0.8）
+ * 改权重只改这一处。
+ */
+export const FINAL_WEIGHTS = { content: 28, voice: 16, visual: 20, stress: 16, teamwork: 8 } as const;
 
 const FILLER_WORDS = ['嗯', '啊', '呃', '那个', '就是', '然后', '这个', '怎么说'];
 const RESPONSE_MARKERS = ['同意', '赞同', '补充', '质疑', '回应', '反对', '认可', '支持'];
@@ -202,13 +211,18 @@ function thresholdScore(value: number, full: number, empty: number): number {
  * 组装报告 v1.5。
  * 规则引擎实算指标 + LLM 语义分（可选，缺失时用规则近似并标注）。
  */
-export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): ReportV15 {
+export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores, visualStats?: VisualStats): ReportV15 {
   const m = computeRuleMetrics(input);
   const evidence = buildEvidencePool(input);
   const contentEvidence = evidence.filter((e) => e.dimension_hint === 'content').slice(0, 5);
   const stressEvidence = evidence.filter((e) => e.dimension_hint === 'stress').slice(0, 3);
   const teamworkEvidence = evidence.filter((e) => e.dimension_hint === 'teamwork').slice(0, 3);
   const voiceEvidence = evidence.slice(0, 3);
+
+  // ---- 视觉维度门控（D4）：摄像头开启且有效采样 ≥ 30 秒才计入综合分；
+  // 拒绝授权 / 跳过 / 中途关闭 / 数据不足 → 走过渡权重，视觉 not_enabled（现状路径）
+  const visualEnabled = visualStats !== undefined && isVisualDataSufficient(visualStats.validRows);
+  const W = visualEnabled ? FINAL_WEIGHTS : TRANSITION_WEIGHTS;
 
   // ---- 内容贡献（max 40）：观点数量 25% / 结构清晰度 25% / 推动讨论 25% / 回应质量 25%
   const opinionsScore = thresholdScore(m.userMessageCount, 5, 1);
@@ -217,7 +231,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   const pushScore = thresholdScore(m.pushDiscussionCount, 3, 0);
   const responseQuality = llm?.responseQuality ?? thresholdScore(m.responseCount, 3, 0);
   const contentRaw = opinionsScore * 0.25 + structureScore * 0.25 + pushScore * 0.25 + responseQuality * 0.25;
-  const content = Math.round((contentRaw / 100) * 40);
+  const content = Math.round((contentRaw / 100) * W.content);
 
   // ---- 语音表现（max 25）：语速 20% / 填充词 20% / 停顿合理性 20% / 打断后恢复 20% / 音量稳定性 20%（P1）
   const rateScore = m.speakingRateWpm > 0 ? thresholdScore(m.speakingRateWpm, 140, 100) : 60; // 100-140 WPM 满分
@@ -226,27 +240,44 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   const recoveryScore = m.interruptRecoveryMs === null ? 70 : thresholdScore(3000 - m.interruptRecoveryMs, 3000, 0); // <3s 满分
   const volumeScore = 60; // P1（音量稳定性）
   const voiceRaw = rateScore * 0.2 + fillerScore * 0.2 + pauseScore * 0.2 + recoveryScore * 0.2 + volumeScore * 0.2;
-  const voice = Math.round((voiceRaw / 100) * 25);
+  const voice = Math.round((voiceRaw / 100) * W.voice);
 
   // ---- 抗压/冲突（max 20）：被质疑后回应质量 50% / 打断后恢复速度 30% / 冲突处理方式 20%
   const stressQuality = llm?.stressResponseQuality ?? (stressEvidence.length > 0 ? 60 : 55);
   const conflictHandling = llm?.conflictHandling ?? 60;
   const stressRaw = stressQuality * 0.5 + recoveryScore * 0.3 + conflictHandling * 0.2;
-  const stress = Math.round((stressRaw / 100) * 20);
+  const stress = Math.round((stressRaw / 100) * W.stress);
 
   // ---- 团队协作（max 15，M3 过渡权重 TRANSITION_WEIGHTS）：回应他人次数 40% / 支持补充他人 30% / 协调分歧 30%
   const respondScore = thresholdScore(m.responseCount, 3, 0);
   const supportScore = llm?.supportOthers ?? respondScore;
   const coordinateScore = llm?.coordinateOthers ?? 55;
   const teamworkRaw = respondScore * 0.4 + supportScore * 0.3 + coordinateScore * 0.3;
-  const teamwork = Math.round((teamworkRaw / 100) * TRANSITION_WEIGHTS.teamwork);
+  const teamwork = Math.round((teamworkRaw / 100) * W.teamwork);
 
-  // ---- 视觉（M6 前不参与总分）
-  const visual = { score: 0, max: 20, status: 'not_enabled' as const, evidence: [] as Evidence[], note: '视觉维度 M6 启用（摄像头分析未开启）' };
+  // ---- 视觉表现（PRD C.2，max 20）：眼神接触 40% / 情绪稳定性 30% / 头部姿态 20% / 参与度 10%
+  const visual = visualEnabled
+    ? {
+        score: Math.round((visualStats!.rawScore / 100) * W.visual),
+        max: W.visual,
+        status: 'enabled' as const,
+        evidence: visualStats!.evidence,
+        metrics: visualMetrics(visualStats!),
+      }
+    : {
+        score: 0,
+        max: W.visual,
+        status: 'not_enabled' as const,
+        evidence: [] as Evidence[],
+        note:
+          visualStats !== undefined
+            ? `视觉数据不足（有效采样 ${visualStats.validRows} 秒 < ${VISUAL_MIN_ROWS} 秒），未参与评分`
+            : '视觉维度未开启（摄像头分析未开启或已关闭），权重已按其余四维归一',
+      };
 
-  const overall = clamp(content + voice + stress + teamwork, 0, 100);
+  const overall = clamp(content + voice + stress + teamwork + visual.score, 0, 100);
 
-  const suggestions = buildSuggestions({ m, content, voice, stress, teamwork });
+  const suggestions = buildSuggestions({ m, content, voice, stress, teamwork, visual: visualEnabled ? visualStats : undefined });
 
   return {
     session_id: null,
@@ -254,7 +285,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
     dimensions: {
       content: {
         score: content,
-        max: 40,
+        max: W.content,
         evidence: [...contentEvidence, ...(llm?.extraEvidence ?? []).filter((e) => e.dimension_hint === 'content')].slice(0, 6),
         metrics: {
           观点数量: m.userMessageCount,
@@ -265,7 +296,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
       },
       voice: {
         score: voice,
-        max: 25,
+        max: W.voice,
         evidence: voiceEvidence,
         metrics: {
           话语权占比: m.voiceShareByTime,
@@ -286,7 +317,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
       visual,
       stress: {
         score: stress,
-        max: 20,
+        max: W.stress,
         evidence: stressEvidence,
         metrics: {
           被打断次数: m.interruptedCount,
@@ -295,7 +326,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
       },
       teamwork: {
         score: teamwork,
-        max: TRANSITION_WEIGHTS.teamwork,
+        max: W.teamwork,
         evidence: teamworkEvidence,
         metrics: {
           回应他人次数: m.responseCount,
@@ -313,8 +344,10 @@ export function buildSuggestions(scores: {
   voice: number;
   stress: number;
   teamwork: number;
+  /** 视觉统计（M6，仅在视觉维度参与评分时传入） */
+  visual?: VisualStats;
 }): string[] {
-  const { m, content, voice, stress, teamwork } = scores;
+  const { m, content, voice, stress, teamwork, visual } = scores;
   const tips: string[] = [];
   if (m.voiceShareByTime < 25) tips.push('下次练习争取更早发言，前 3 分钟至少贡献 1 个核心观点');
   if (m.userMessageCount < 4) tips.push('增加有效发言次数，目标每场至少 5 次有观点的发言');
@@ -322,6 +355,13 @@ export function buildSuggestions(scores: {
   if (voice < 15 && m.fillerRatio >= 3) tips.push(`减少口头填充词（当前约 ${m.fillerRatio}% 的字数含"嗯/那个"等）`);
   if (stress < 12 && m.interruptedCount > 0) tips.push('被质疑或打断后，先确认对方观点再回应，争取 3 秒内恢复');
   if (teamwork < 9) tips.push('多回应他人观点（同意并推进/质疑后给方案），目标每场回应 ≥3 次');
+  // 视觉建议（M6，追加）：阈值与 PRD C.2 满分条件一致
+  if (visual) {
+    if (visual.eyeContactRatio < VISUAL_FULL.eyeContact) tips.push('发言时多抬头直视摄像头，眼神接触目标 ≥70%（当前不足）');
+    if (visual.nervousRatio >= VISUAL_FULL.nervous) tips.push('放松面部表情，减少皱眉/嘴角下沉等紧张信号（当前紧张占比 ≥20%）');
+    if (visual.headPoseRatio >= VISUAL_FULL.headPose) tips.push('减少低头与头部偏转，保持面部正对镜头（当前低头/偏头占比 ≥30%）');
+  }
   if (tips.length === 0) tips.push('表现均衡，尝试在总结阶段主动承担汇报，展示领导力');
-  return tips.slice(0, 5);
+  // 视觉维度参与评分时多一条维度建议（最多 6 条），否则维持 5 条上限
+  return tips.slice(0, visual ? 6 : 5);
 }

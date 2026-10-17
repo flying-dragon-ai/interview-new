@@ -177,6 +177,24 @@ export async function saveEvents(
   }
 }
 
+// 视觉聚合特征批量入库（M6：每秒一条，PRD D.4；聚合数值/枚举才离开浏览器）
+export async function saveVisualFeatures(
+  sessionId: number,
+  rows: import('../types').VisualFeatureRow[]
+): Promise<boolean> {
+  if (!sessionId || rows.length === 0) return false;
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/visual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, rows }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // 保存报告 v1.5（reports JSONB 列）
 export async function saveReport(params: {
   sessionId: number;
@@ -195,6 +213,7 @@ export async function saveReport(params: {
           ...params.report.dimensions.content.evidence,
           ...params.report.dimensions.stress.evidence,
           ...params.report.dimensions.teamwork.evidence,
+          ...params.report.dimensions.visual.evidence,
         ],
         suggestions: params.report.suggestions,
         timing: params.legacy?.timing ?? null,
