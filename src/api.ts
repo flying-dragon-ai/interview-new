@@ -19,6 +19,7 @@ export interface Session {
   started_at?: string;
   ended_at?: string;
   finished_at?: string;
+  wallet_address?: string | null;
 }
 
 export interface MessageRecord {
@@ -56,6 +57,8 @@ export async function createSession(params: {
   voiceEnabled?: boolean;
   cameraEnabled?: boolean;
   userId?: number | null;
+  /** Q-N1：Para 钱包地址（0x…42 字符），免登录用户标识；匿名时传 null */
+  walletAddress?: string | null;
 }): Promise<Session | null> {
   try {
     const res = await fetch(`${API_BASE}/session`, {
@@ -70,6 +73,7 @@ export async function createSession(params: {
         voice_enabled: params.voiceEnabled ?? false,
         camera_enabled: params.cameraEnabled ?? false,
         user_id: params.userId ?? null,
+        wallet_address: params.walletAddress ?? null,
       }),
     });
     if (!res.ok) return null;

@@ -5,6 +5,8 @@ import VoiceRoom from './components/VoiceRoom';
 import EvidenceReport from './components/EvidenceReport';
 import FeedbackReport from './components/FeedbackReport';
 import PrivacyPolicy from './components/PrivacyPolicy';
+import WalletButton from './components/WalletButton';
+import { useWalletIdentity } from './src/wallet/context';
 import { SimulationState, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
 import { generateReportV15, generateFeedback } from './services/geminiService';
 import {
@@ -47,6 +49,8 @@ const App: React.FC = () => {
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  // Q-N1：Para 钱包地址作为免登录用户标识（未配置 Para 时恒为匿名）
+  const wallet = useWalletIdentity();
 
   // ---- 准备页 → 设备检测 ----
   const startPreparation = (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[] }) => {
@@ -76,6 +80,7 @@ const App: React.FC = () => {
       roles: roles.map((r) => r.id),
       voiceEnabled: result.voiceEnabled,
       cameraEnabled: result.cameraEnabled,
+      walletAddress: wallet.address,
     });
     if (session) {
       setSessionId(session.id);
@@ -184,6 +189,7 @@ const App: React.FC = () => {
                 本地模式（未配置数据库）
               </span>
             )}
+            <WalletButton />
             <button onClick={() => setShowPrivacy(true)} className="text-sm text-slate-500 hover:text-blue-600">
               隐私政策
             </button>
