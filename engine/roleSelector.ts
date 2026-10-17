@@ -1,5 +1,5 @@
 import type { RoleCard } from '../types';
-import { ROLE_CARDS } from '../data/roleCards.ts';
+import { ROLE_CARDS } from '../data/roleCards.js';
 
 /**
  * 每场 3 张角色卡分配（PRD 附录 A.3 / 4.1.8）
@@ -90,7 +90,7 @@ export function validateSelection(cards: RoleCard[]): SelectionViolation[] {
  */
 export function autoSelectRoles(industry: string, seed: number): RoleCard[] {
   const rng = createRng(seed);
-  const pool = shuffle(ROLE_CARDS, rng);
+  const pool = shuffle(ROLE_CARDS.filter((card) => card.id !== 'tech_interviewer'), rng);
 
   const sameIndustry = pool.filter((c) => c.industry === industry);
   const highConflict = pool.filter((c) => c.persona.conflict_level === 'high');
@@ -150,6 +150,36 @@ export function autoSelectRoles(industry: string, seed: number): RoleCard[] {
   }
 
   return chosen.slice(0, 3);
+}
+
+/**
+ * 题型驱动的三名 AI 候选人分配。
+ * 保留 12 张角色卡资产，但按排序/方案设计/开放辩论调整性格组合优先级。
+ */
+export function autoSelectRolesForTopic(industry: string, topicType: string, seed: number): RoleCard[] {
+  const base = autoSelectRoles(industry, seed);
+  const preferred: Record<string, string[]> = {
+    priority_ranking: ['supplement_data', 'focus_cost_efficiency', 'framework_speech'],
+    business_case: ['framework_speech', 'challenge_others', 'coordinate_summarize'],
+    open_debate: ['challenge_others', 'storytelling', 'fast_rebuttal'],
+  };
+  const strategies = preferred[topicType] ?? preferred.business_case;
+  const pool = ROLE_CARDS.filter((card) => card.industry === industry || industry === 'internet');
+  const candidates = [...pool, ...ROLE_CARDS.filter((card) => card.id !== 'tech_interviewer')].filter((card, index, all) => all.findIndex((x) => x.id === card.id) === index);
+  const ranked = candidates.sort((a, b) => {
+    const ai = strategies.indexOf(a.persona.conflict_strategy);
+    const bi = strategies.indexOf(b.persona.conflict_strategy);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+  for (let i = 0; i < ranked.length; i += 1) {
+    for (let j = i + 1; j < ranked.length; j += 1) {
+      for (let k = j + 1; k < ranked.length; k += 1) {
+        const triple = [ranked[i], ranked[j], ranked[k]];
+        if (validateSelection(triple).length === 0) return triple;
+      }
+    }
+  }
+  return base;
 }
 
 /** 用户自选的卡片集合 → RoleCard（保持顺序） */

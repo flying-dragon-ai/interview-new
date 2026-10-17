@@ -1,5 +1,7 @@
 # Vercel 部署指南
 
+> 当前部署配置由仓库根目录的 `vercel.json` 管理：Vite 静态站点加一个统一 Node API 函数，以适配 Hobby 每次部署最多 12 个函数的限制。不要在 Vercel 项目设置中覆盖仓库的 Builds/Routes 配置；部署密钥应配置在 Vercel Environment Variables 中，不要打包 `.env.local`。
+
 ## 部署前准备
 
 ### 1. 更新依赖锁文件
@@ -34,7 +36,7 @@ git push
 3. **配置环境变量**
    - 在 "Environment Variables" 部分添加：
      - **Name**: `DEEPSEEK_API_KEY`
-     - **Value**: 你的 DeepSeek API Key（`sk-84606ff70f2d44f992e1d3cce2851818`）
+     - **Value**: 你的 DeepSeek API Key（`<REDACTED_REVOKE_AND_REPLACE>`）
      - **Environment**: 选择 `Production`, `Preview`, `Development`（全部勾选）
 
 4. **配置构建设置**
@@ -68,7 +70,7 @@ git push
 4. **设置环境变量**
    ```bash
    vercel env add DEEPSEEK_API_KEY
-   # 输入你的 API Key: sk-84606ff70f2d44f992e1d3cce2851818
+   # 输入你的 API Key: <REDACTED_REVOKE_AND_REPLACE>
    # 选择环境: Production, Preview, Development
    ```
 

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.ts';
-import { createSseWriter } from './_lib/sse.ts';
-import { checkRateLimit } from './_lib/ratelimit.ts';
+import { isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.js';
+import { createSseWriter } from './_lib/sse.js';
+import { checkRateLimit } from './_lib/ratelimit.js';
 
 /**
  * /api/asr —— StepFun ASR 服务端代理（PRD 4.1.6 / G.2 / C9）

@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { GameEvent, Message, RoleCard, SimulationState } from '../types';
 import { USER_INFO } from '../data/userInfo';
 import { findAvatarPreset } from '../data/avatars.ts';
+import { findRoleCard } from '../data/roleCards';
 import {
   initPhaseEngine,
   tickPhase,
   advancePhaseByKeyword,
   currentPhase,
+  getPhaseDefs,
   currentOpeningSpeaker,
   phaseRemainingMs,
   phaseProgress,
@@ -27,10 +29,11 @@ import {
   type TurnTakingState,
 } from '../engine/turnTaking';
 import { extractKeyPoints, MAX_DISCUSSIONS_PER_KEY_POINT } from '../engine/keyPoints';
-import { generateAIReply } from '../services/geminiService';
+import { generateAIReply, generateAIRepliesInParallel } from '../services/geminiService';
 import { VoiceService, type VoiceCapabilities } from '../services/voiceService';
 import { saveMessage, saveEvents } from '../src/api';
 import AvatarStage from './AvatarStage';
+import StageNavigator from './StageNavigator';
 
 /**
  * 群面房间（PRD 4.1.3 / 4.1.4 / 4.1.5 / 4.1.6）
@@ -49,6 +52,8 @@ interface DiscussionPanelProps {
   cameraEnabled: boolean;
   facingMode: 'user' | 'environment';
   onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number) => void;
+  resumeCheckpoint?: PhaseState | null;
+  demoMode?: boolean;
 }
 
 const TICK_MS = 250;
@@ -61,9 +66,13 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   cameraEnabled,
   facingMode,
   onFinish,
+  resumeCheckpoint,
+  demoMode = false,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [phaseState, setPhaseState] = useState<PhaseState>(() => initPhaseEngine(Date.now()));
+  const [phaseState, setPhaseState] = useState<PhaseState>(() => demoMode
+    ? initPhaseEngine(Date.now())
+    : resumeCheckpoint ?? initPhaseEngine(Date.now()));
   const [nowTs, setNowTs] = useState(Date.now());
   const [activeCharId, setActiveCharId] = useState<string | null>(null);
   const [speakingCharId, setSpeakingCharId] = useState<string | null>(null);
@@ -80,6 +89,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   const [cameraOn, setCameraOn] = useState(cameraEnabled);
   const [degraded, setDegraded] = useState(false);
   const [currentKeyPoint, setCurrentKeyPoint] = useState<string | null>(null);
+  const interviewerCard = findRoleCard('tech_interviewer') ?? null;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -90,8 +100,10 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   const keyPointIndexRef = useRef(0);
   const keyPointCountRef = useRef(0);
   const generatingRef = useRef<Set<string>>(new Set());
+  const demoParallelTriggeredRef = useRef(false);
   const openingTriggeredRef = useRef<Set<number>>(new Set());
   const scheduledRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleNextTurnRef = useRef<(delayMs?: number) => void>(() => undefined);
   const activeCharIdRef = useRef<string | null>(null);
   const awaitingUserRef = useRef(false);
   const speakEndsAtRef = useRef<number>(0);
@@ -103,6 +115,20 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
 
   const phaseConfig: PhaseConfig = {
     openingOrder: buildOpeningOrder(roles),
+    phaseSet: 'mocksharp',
+    ...(demoMode ? {
+      openingTurnMs: 4_000,
+      durationsMs: {
+        SELF_INTRODUCTION: 16_000,
+        READING: 5_000,
+        INDIVIDUAL_THINKING: 5_000,
+        GROUP_DISCUSSION: 12_000,
+        PRESENTATION: 8_000,
+        INTERVIEWER_QA: 8_000,
+        REVERSE_QUESTION: 5_000,
+        REVIEW: 3_000,
+      },
+    } : {}),
   };
 
   function buildOpeningOrder(cards: RoleCard[]): string[] {
@@ -114,6 +140,10 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   }
 
   // ---------- 初始化 ----------
+  useEffect(() => {
+    try { localStorage.setItem(`lgd-checkpoint:${state.topic}`, JSON.stringify(phaseState)); } catch { /* best effort */ }
+  }, [phaseState, state.topic]);
+
   useEffect(() => {
     sessionStartAtRef.current = Date.now();
     const points = extractKeyPoints(state.topic);
@@ -180,11 +210,125 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
           endMs: msg.endMs,
           confidence: msg.confidence,
           stepfunSegmentId: msg.stepfunSegmentId ?? null,
+          phaseId: msg.phaseId,
+          participantType: msg.participantType,
+          turnIndex: msg.turnIndex,
+          isQuestion: msg.isQuestion,
+          isAnswer: msg.isAnswer,
+          isSummary: msg.isSummary,
+          isInterruption: msg.isInterruption,
+          replyToMessageId: msg.replyToMessageId,
+          audioStatus: msg.audioStatus,
         });
       }
     },
     [consentSaveTranscript, sessionId]
   );
+
+  const triggerDemoParallelBatch = useCallback(async () => {
+    const phase = currentPhase(phaseRef.current, phaseConfig);
+    if (!demoMode || phase.id !== 'GROUP_DISCUSSION' || demoParallelTriggeredRef.current || finishedRef.current) return;
+    const candidates = roles.slice(0, 3);
+    if (candidates.length < 2) return;
+
+    demoParallelTriggeredRef.current = true;
+    candidates.forEach((card) => generatingRef.current.add(card.id));
+    const historySnapshot = [...messagesRef.current];
+    const startedAt = Date.now();
+    const elapsed = startedAt - sessionStartAtRef.current;
+    setAwaitingUser(false);
+    awaitingUserRef.current = false;
+    setIsGenerating(true);
+    setStreamingText(`${candidates.length} 位 AI 候选人正在并行分析同一题目…`);
+    pushEvents(candidates.map((card) => ({
+      event_type: 'speaker_start' as const,
+      actor: card.id,
+      target: 'all',
+      timestamp_ms: elapsed,
+      metadata: { phase: phase.id, mode: 'parallel_demo_batch' },
+    })));
+
+    const params = candidates.map((card) => ({
+      card,
+      topic: state.topic,
+      jobTitle: state.jobTitle,
+      history: historySnapshot,
+      phase: phase.promptPhase,
+      currentKeyPoint: keyPointsRef.current[keyPointIndexRef.current] ?? null,
+      keyPointDiscussionCount: keyPointCountRef.current,
+      allKeyPointsDiscussed: keyPointIndexRef.current >= keyPointsRef.current.length,
+      allKeyPoints: keyPointsRef.current,
+      currentKeyPointIndex: keyPointIndexRef.current,
+      voiceMode: false,
+      phaseRemainingMs: phaseRemainingMs(phaseRef.current, startedAt, phaseConfig),
+      sessionId,
+    }));
+
+    try {
+      const replies = await generateAIRepliesInParallel(params, async (request) => {
+        try {
+          return await generateAIReply(request);
+        } catch (error) {
+          console.warn('并行演示回应不可用，使用本地演示话术:', error);
+          setDegraded(true);
+          const fallbackLines = [
+            `【本地演示话术】我先把目标、用户需求和关键约束拆开，再统一评价指标：${request.topic.slice(0, 48)}`,
+            '【本地演示话术】我补充一个协作视角：先对齐共同目标，再比较方案的收益、成本和潜在风险。',
+            '【本地演示话术】为了尽快验证结论，我建议明确负责人和时间点，用小规模试点数据决定下一步。',
+          ];
+          return {
+            content: fallbackLines[candidates.findIndex((item) => item.id === request.card.id)] ?? fallbackLines[0],
+            emotion: 'neutral',
+            target: null,
+            stepfun_tts_instruction: null,
+          };
+        }
+      });
+
+      if (finishedRef.current) return;
+      replies.forEach((reply, index) => {
+        const card = candidates[index];
+        const endedAt = Date.now();
+        const content = reply.content.trim();
+        if (!content) return;
+        addMessage({
+          id: `${endedAt}-${card.id}-parallel-demo`,
+          senderId: card.id,
+          senderName: card.name,
+          content,
+          timestamp: endedAt,
+          type: 'message',
+          startMs: elapsed,
+          endMs: endedAt - sessionStartAtRef.current,
+          emotion: reply.emotion,
+          phaseId: phase.id,
+          participantType: 'candidate',
+          turnIndex: messagesRef.current.length + 1,
+          audioStatus: 'text_only',
+        });
+        turnRef.current = registerSpeak(turnRef.current, card.id, endedAt);
+        maybeAdvanceKeyPoint(content);
+      });
+      speakEndsAtRef.current = Date.now();
+      pushEvents(candidates.map((card) => ({
+        event_type: 'speaker_end' as const,
+        actor: card.id,
+        target: 'all',
+        timestamp_ms: Date.now() - sessionStartAtRef.current,
+        metadata: { phase: phase.id, mode: 'parallel_demo_batch' },
+      })));
+      setAwaitingUser(true);
+      awaitingUserRef.current = true;
+      turnRef.current = { ...turnRef.current, userCalledAt: Date.now() };
+    } finally {
+      candidates.forEach((card) => generatingRef.current.delete(card.id));
+      setIsGenerating(false);
+      setStreamingText('');
+      if (!finishedRef.current) scheduleNextTurnRef.current(8_000);
+    }
+  // phaseConfig is stable for the duration of this room; timer settings only change on mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addMessage, demoMode, pushEvents, roles, sessionId, state.jobTitle, state.topic]);
 
   // ---------- 完成 ----------
   const finishSession = useCallback(() => {
@@ -211,6 +355,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       awaitingUserRef.current = false;
 
       const startedAt = Date.now();
+      pushEvents([{ event_type: 'speaker_start', actor: card.id, target: 'all', timestamp_ms: startedAt - sessionStartAtRef.current, metadata: { phase: phase.id } }]);
       try {
         const remainingMs = phaseRemainingMs(phaseRef.current, startedAt, phaseConfig);
         const result = await generateAIReply(
@@ -246,6 +391,13 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
           startMs: startedAt - sessionStartAtRef.current,
           endMs: endedAt - sessionStartAtRef.current,
           emotion: result.emotion,
+          phaseId: phase.id,
+          participantType: card.id === 'tech_interviewer' ? 'interviewer' : 'candidate',
+          turnIndex: messagesRef.current.length + 1,
+          isQuestion: card.id === 'tech_interviewer' && phase.id === 'INTERVIEWER_QA',
+          isAnswer: card.id === 'tech_interviewer' && phase.id === 'REVERSE_QUESTION',
+          isSummary: phase.id === 'PRESENTATION',
+          audioStatus: voiceCaps?.outputMode === 'stepfun-tts' ? 'played' : 'text_only',
         });
 
         turnRef.current = registerSpeak(turnRef.current, card.id, endedAt);
@@ -263,7 +415,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         maybeAdvanceKeyPoint(content);
 
         // 关键词辅助（兜底）：自由讨论中检测到总结引导 → 可提前进入总结
-        if (phase.id === 'FREE_DISCUSSION' && shouldAdvanceByKeyword(content)) {
+        if ((phase.id === 'FREE_DISCUSSION' || phase.id === 'GROUP_DISCUSSION') && shouldAdvanceByKeyword(content)) {
           const res = advancePhaseByKeyword(phaseRef.current, Date.now(), phaseConfig, sessionStartAtRef.current);
           if (res.changed) {
             phaseRef.current = res.state;
@@ -290,6 +442,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         console.error('AI 发言失败:', err);
         setDegraded(true);
       } finally {
+        pushEvents([{ event_type: 'speaker_end', actor: card.id, target: 'all', timestamp_ms: Date.now() - sessionStartAtRef.current, metadata: { phase: phase.id } }]);
         generatingRef.current.delete(card.id);
         activeCharIdRef.current = null;
         setActiveCharId(null);
@@ -350,12 +503,34 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         if (finishedRef.current) return;
         const phase = currentPhase(phaseRef.current, phaseConfig);
         if (!phase.allowSpeech) return;
+        // 自我介绍由 openingOrder + 每人 1 分钟的阶段时钟驱动，避免通用调度器抢先重复点名。
+        if (phase.id === 'SELF_INTRODUCTION') return;
+        if (demoMode && phase.id === 'GROUP_DISCUSSION' && !demoParallelTriggeredRef.current) {
+          void triggerDemoParallelBatch();
+          return;
+        }
         if (generatingRef.current.size > 0) return;
 
         const now = Date.now();
         const urgency = stageUrgency(phaseRef.current, now, phaseConfig);
         const silenceMs = Math.max(0, now - Math.max(speakEndsAtRef.current, sessionStartAtRef.current));
-        const decision = selectNextSpeaker(roles, turnRef.current, { now, stageUrgency: urgency, silenceMs });
+        const activeRoles = (phase.id === 'INTERVIEWER_QA' || phase.id === 'REVERSE_QUESTION')
+          ? [...roles, ...(interviewerCard ? [interviewerCard] : [])]
+          : roles;
+        const phaseInterviewer = (phase.id === 'INTERVIEWER_QA' || phase.id === 'REVERSE_QUESTION') ? interviewerCard : null;
+        if (phase.id === 'REVERSE_QUESTION' && !awaitingUserRef.current && phaseInterviewer && turnRef.current.currentSpeaker !== phaseInterviewer.id) {
+          setAwaitingUser(true);
+          awaitingUserRef.current = true;
+          turnRef.current = { ...turnRef.current, userCalledAt: now };
+          return;
+        }
+        if (phase.id === 'INTERVIEWER_QA' && phaseInterviewer && turnRef.current.currentSpeaker !== phaseInterviewer.id && !awaitingUserRef.current) {
+          setAwaitingUser(false);
+          awaitingUserRef.current = false;
+          triggerAITurnRef.current(phaseInterviewer);
+          return;
+        }
+        const decision = selectNextSpeaker(activeRoles, turnRef.current, { now, stageUrgency: urgency, silenceMs });
 
         // barge-in 后 12 秒内优先等用户输入
         const sinceBarge = now - bargedInAtRef.current;
@@ -371,7 +546,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         } else {
           setAwaitingUser(false);
           awaitingUserRef.current = false;
-          const card = roles.find((c) => c.id === decision.speakerId);
+          const card = activeRoles.find((c) => c.id === decision.speakerId);
           if (card) {
             turnRef.current = registerUserMissedTurn(turnRef.current);
             triggerAITurnRef.current(card);
@@ -383,8 +558,12 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       scheduledRef.current = setTimeout(fire, delay);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roles]
+    [demoMode, roles, triggerDemoParallelBatch]
   );
+
+  useEffect(() => {
+    scheduleNextTurnRef.current = scheduleNextTurn;
+  }, [scheduleNextTurn]);
 
   // ---------- 主循环 ----------
   useEffect(() => {
@@ -408,7 +587,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       const phase = currentPhase(phaseRef.current, phaseConfig);
 
       // 2) 个人陈述：按顺序触发
-      if (phase.id === 'OPENING') {
+      if (phase.id === 'OPENING' || phase.id === 'SELF_INTRODUCTION') {
         const idx = phaseRef.current.openingIndex;
         const speaker = currentOpeningSpeaker(phaseRef.current, phaseConfig);
         if (speaker && !openingTriggeredRef.current.has(idx)) {
@@ -427,11 +606,20 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         return;
       }
 
-      if (phase.id === 'READING') return;
+      if (phase.id === 'READING' || phase.id === 'INDIVIDUAL_THINKING' || phase.id === 'REVIEW') return;
+      if (phase.id === 'REVERSE_QUESTION' && !awaitingUserRef.current && generatingRef.current.size === 0) {
+        setAwaitingUser(true);
+        awaitingUserRef.current = true;
+        turnRef.current = { ...turnRef.current, userCalledAt: now };
+        return;
+      }
 
       // 3) 自由讨论 / 总结：打断规则 + 发言权调度
       // 3a. 用户被点名 5 秒未回应 → 其他 AI 接话
-      const noResp = evaluateUserCalledNoResponse(roles, turnRef.current, now);
+      const activeRoles = (phase.id === 'INTERVIEWER_QA' || phase.id === 'REVERSE_QUESTION')
+        ? [...roles, ...(interviewerCard ? [interviewerCard] : [])]
+        : roles;
+      const noResp = evaluateUserCalledNoResponse(activeRoles, turnRef.current, now);
       if (noResp.type === 'interrupt') {
         turnRef.current = registerInterrupt(turnRef.current, noResp.targetId, noResp.interrupterId);
         pushEvents([
@@ -446,14 +634,14 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         // 接管后重置计数，避免「强制分配→5秒接管→再强制分配」死循环（B.6 语义修正）
         turnRef.current = { ...turnRef.current, userCalledAt: null, userMissedTurns: 0 };
         setAwaitingUser(false);
-        const card = roles.find((c) => c.id === noResp.interrupterId);
+        const card = activeRoles.find((c) => c.id === noResp.interrupterId);
         if (card) triggerAITurnRef.current(card);
         return;
       }
 
       // 3b. 发言超时打断（用户 >30s / AI >40s）
       if (now < speakEndsAtRef.current && turnRef.current.currentSpeaker) {
-        const interrupt = evaluateInterrupt(roles, turnRef.current, now);
+        const interrupt = evaluateInterrupt(activeRoles, turnRef.current, now);
         if (interrupt.type === 'interrupt') {
           voiceRef.current?.bargeIn();
           setSpeakingCharId(null);
@@ -467,7 +655,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
               metadata: { rule: interrupt.rule },
             },
           ]);
-          const card = roles.find((c) => c.id === interrupt.interrupterId);
+          const card = activeRoles.find((c) => c.id === interrupt.interrupterId);
           if (card) triggerAITurnRef.current(card);
           return;
         }
@@ -478,6 +666,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       const userWaitingTooLong =
         awaitingUserRef.current && turnRef.current.userCalledAt !== null && now - turnRef.current.userCalledAt > 8000;
       if ((nobodyActive && !scheduledRef.current) || userWaitingTooLong) {
+        scheduleNextTurn(900);
       }
     }, TICK_MS);
     return () => clearInterval(interval);
@@ -509,6 +698,11 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       type: 'message',
       startMs: sentAt - sessionStartAtRef.current,
       endMs: sentAt - sessionStartAtRef.current + estimateSpeakMs(text),
+      phaseId: currentPhase(phaseRef.current, phaseConfig).id,
+      participantType: 'user',
+      turnIndex: messagesRef.current.length + 1,
+      isQuestion: currentPhase(phaseRef.current, phaseConfig).id === 'REVERSE_QUESTION',
+      audioStatus: voiceCaps?.inputMode === 'stepfun-asr' ? 'transcribed' : 'text_only',
     };
     addMessage(msg);
     setInputValue('');
@@ -555,14 +749,15 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
 
   // ---------- 渲染 ----------
   const phase = currentPhase(phaseState, phaseConfig);
+  const phaseDefs = getPhaseDefs(phaseConfig);
   const remaining = phaseRemainingMs(phaseState, nowTs, phaseConfig);
   const progress = phaseProgress(phaseState, nowTs, phaseConfig);
   const openingSpeaker = currentOpeningSpeaker(phaseState, phaseConfig);
   const openingRemaining =
-    phase.id === 'OPENING'
-      ? Math.max(0, OPENING_TURN_MS - (nowTs - phaseState.openingStartedAt))
+    (phase.id === 'OPENING' || phase.id === 'SELF_INTRODUCTION')
+      ? Math.max(0, (phaseConfig.openingTurnMs ?? OPENING_TURN_MS) - (nowTs - phaseState.openingStartedAt))
       : 0;
-  const displayRemaining = phase.id === 'OPENING' ? Math.min(remaining, openingRemaining) : remaining;
+  const displayRemaining = (phase.id === 'OPENING' || phase.id === 'SELF_INTRODUCTION') ? Math.min(remaining, openingRemaining) : remaining;
 
   return (
     <div className="flex h-full bg-slate-50 overflow-hidden relative flex-col md:flex-row">
@@ -570,6 +765,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       <div className="flex-1 flex flex-col min-w-0">
       {/* 顶部：阶段 + 倒计时 + 题目折叠 */}
       <div className="bg-white border-b border-slate-200 p-3 md:p-4 shadow-sm z-10">
+        <StageNavigator phases={phaseDefs} currentIndex={phaseState.phaseIndex} />
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
@@ -580,7 +776,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             <div>
               <h2 className="text-sm font-black text-slate-800 tracking-tight">
                 {phase.label}
-                {phase.id === 'OPENING' && openingSpeaker && (
+                {(phase.id === 'OPENING' || phase.id === 'SELF_INTRODUCTION') && openingSpeaker && (
                   <span className="ml-2 text-blue-600">
                     {openingSpeaker === 'user' ? '轮到你陈述' : `${roles.find((c) => c.id === openingSpeaker)?.name ?? ''} 陈述中`}
                   </span>
@@ -636,6 +832,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       <div className="md:hidden px-3 pt-3">
         <AvatarStage
           cards={roles}
+            interviewerCard={interviewerCard}
           activeCardId={activeCharId}
           speakingCardId={speakingCharId}
           cameraEnabled={cameraOn}
@@ -650,8 +847,40 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         {phase.id === 'READING' && (
           <div className="text-center py-10">
             <div className="text-4xl mb-3">📖</div>
-            <div className="text-lg font-bold text-slate-700">审题阶段</div>
-            <p className="text-sm text-slate-500 mt-1">请阅读题目，倒计时结束后进入个人陈述（每人 1 分钟）</p>
+            <div className="text-lg font-bold text-slate-700">读题</div>
+            <p className="text-sm text-slate-500 mt-1">请阅读题目，倒计时结束后进入独立思考。</p>
+          </div>
+        )}
+
+        {phase.id === 'INDIVIDUAL_THINKING' && (
+          <div className="text-center py-10">
+            <div className="text-4xl mb-3">🧠</div>
+            <div className="text-lg font-bold text-slate-700">独立思考</div>
+            <p className="text-sm text-slate-500 mt-1">请整理你的观点，讨论开始后再发言。</p>
+          </div>
+        )}
+
+        {phase.id === 'PRESENTATION' && (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-2">📣</div>
+            <div className="text-lg font-bold text-slate-700">小组汇报</div>
+            <p className="text-sm text-slate-500 mt-1">请围绕最终方案说明结论、依据和分工。</p>
+          </div>
+        )}
+
+        {phase.id === 'INTERVIEWER_QA' && (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-2">🎯</div>
+            <div className="text-lg font-bold text-slate-700">面试官提问</div>
+            <p className="text-sm text-slate-500 mt-1">面试官会针对方案和你的贡献继续追问。</p>
+          </div>
+        )}
+
+        {phase.id === 'REVERSE_QUESTION' && (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-2">💬</div>
+            <div className="text-lg font-bold text-slate-700">反问环节</div>
+            <p className="text-sm text-slate-500 mt-1">准备一个能体现思考深度的问题。</p>
           </div>
         )}
 

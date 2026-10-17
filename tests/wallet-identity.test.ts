@@ -228,11 +228,10 @@ test('接线：app-entry 包裹 ParaWalletProvider', () => {
   assert.ok(/<ParaWalletProvider>[\s\S]*<App \/>[\s\S]*<\/ParaWalletProvider>/.test(entry), 'App 未被 provider 包裹');
 });
 
-test('接线：App 使用钱包身份并渲染 WalletButton、createSession 传地址', () => {
+test('接线：首期使用匿名用户，不展示钱包身份入口', () => {
   const app = read('App.tsx');
-  assert.ok(/useWalletIdentity/.test(app), 'App 未使用 useWalletIdentity');
-  assert.ok(/<WalletButton \/>/.test(app), 'App 未渲染 WalletButton');
-  assert.ok(/walletAddress:\s*wallet\.address/.test(app), 'createSession 未透传钱包地址');
+  assert.ok(/walletAddress:\s*null/.test(app), '首期练习未使用匿名地址');
+  assert.ok(!/<WalletButton \/>/.test(app), '首期不应展示钱包入口');
 });
 
 test('接线：src/api.ts 发送 wallet_address；迁移 SQL 与 .monskills 就位', () => {

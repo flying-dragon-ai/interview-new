@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getPool, isDatabaseConfigured } from '../../_lib/db.ts';
+import { getPool, isDatabaseConfigured } from '../../_lib/db.js';
 
 /**
  * GET /api/sessions/{id}/report —— 获取报告（v1.5，PRD E.2 / E.5）

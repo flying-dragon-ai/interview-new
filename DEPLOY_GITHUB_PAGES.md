@@ -35,7 +35,7 @@
 
 2. **添加 DEEPSEEK_API_KEY**
    - Name: `DEEPSEEK_API_KEY`
-   - Value: 你的 DeepSeek API Key（`sk-84606ff70f2d44f992e1d3cce2851818`）
+   - Value: 你的 DeepSeek API Key（`<REDACTED_REVOKE_AND_REPLACE>`）
    - 点击 **Add secret**
 
 ### 第三步：触发部署

@@ -189,6 +189,14 @@ export async function generateAIReply(
   return data;
 }
 
+/** 并行生成同一轮中多个 AI 候选人的回应；调用方负责按稳定顺序呈现结果。 */
+export async function generateAIRepliesInParallel(
+  params: readonly ReplyParams[],
+  generate: (item: ReplyParams) => Promise<ReplyResult> = generateAIReply
+): Promise<ReplyResult[]> {
+  return Promise.all(params.map((item) => generate(item)));
+}
+
 /** 旧 4 字段报告（PRD D.2：保留冗余展示） */
 export async function generateFeedback(
   topic: string,

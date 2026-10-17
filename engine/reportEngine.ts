@@ -245,12 +245,18 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   const visual = { score: 0, max: 20, status: 'not_enabled' as const, evidence: [] as Evidence[], note: '视觉维度 M6 启用（摄像头分析未开启）' };
 
   const overall = clamp(content + voice + stress + teamwork, 0, 100);
+  const performanceLevel: ReportV15['performance_level'] = overall >= 80 ? '领先' : overall >= 60 ? '良好' : '待提升';
+  const performanceRank = overall >= 85 ? '前 20%' : overall >= 70 ? '前 40%' : overall >= 55 ? '中段' : '后 40%';
+  const simulatedRank = overall >= 85 ? '模拟第1梯队' : overall >= 70 ? '模拟第2梯队' : overall >= 55 ? '模拟第3梯队' : '模拟待提升';
 
   const suggestions = buildSuggestions({ m, content, voice, stress, teamwork });
 
   return {
     session_id: null,
     overall_score: overall,
+    performance_rank: performanceRank,
+    simulated_rank: simulatedRank,
+    performance_level: performanceLevel,
     dimensions: {
       content: {
         score: content,

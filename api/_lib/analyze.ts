@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
 import type { GameEvent, Message, ReportV15 } from '../../types';
-import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../../engine/reportEngine.ts';
-import { callDeepSeek } from './llm.ts';
-import { buildAnalysisPrompt } from './prompts.ts';
-import { safeJsonParse } from './jsonStream.ts';
+import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../../engine/reportEngine.js';
+import { callDeepSeek } from './llm.js';
+import { buildAnalysisPrompt } from './prompts.js';
+import { safeJsonParse } from './jsonStream.js';
 
 /**
  * 面后分析流水线（PRD 7.6 / E.2：/api/sessions/{id}/analyze）
@@ -59,6 +59,9 @@ export async function analyzeSession(
       endMs: r.end_ms ?? undefined,
       confidence: r.confidence ?? undefined,
       stepfunSegmentId: r.stepfun_segment_id ?? undefined,
+      phaseId: r.phase_id ?? undefined,
+      participantType: r.participant_type ?? (isUser ? 'user' : 'candidate'),
+      turnIndex: r.turn_index ?? undefined,
     };
   });
   const events: GameEvent[] = eventRows.map((r) => ({

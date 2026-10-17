@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { AVATAR_PRESETS } from '../data/avatars.ts';
+import { AVATAR_PRESETS } from '../data/avatars.js';
 
 /**
  * GET /api/avatars/presets —— 预设形象列表（PRD E.2 / 4.1.8）

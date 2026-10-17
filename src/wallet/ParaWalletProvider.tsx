@@ -11,13 +11,14 @@ import { WalletIdentityContext, anonymousIdentity } from './context';
  */
 
 const LazyInner = lazy(() => import('./ParaWalletProviderInner'));
+const LazyInjected = lazy(() => import('./InjectedWalletProvider'));
 
 export function ParaWalletProvider({ children }: { children: ReactNode }) {
   if (!isParaConfigured()) {
     return (
-      <WalletIdentityContext.Provider value={anonymousIdentity}>
-        {children}
-      </WalletIdentityContext.Provider>
+      <Suspense fallback={<WalletIdentityContext.Provider value={{ ...anonymousIdentity, configured: true, isLoading: true }}>{children}</WalletIdentityContext.Provider>}>
+        <LazyInjected>{children}</LazyInjected>
+      </Suspense>
     );
   }
   return (

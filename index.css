@@ -2,7 +2,29 @@
 
 body {
   font-family: 'Inter', sans-serif;
+  background: #f4f4f0;
+  color: #101010;
 }
+
+.mocksharp-home { max-width: 1180px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+.mocksharp-hero { padding: 2rem 0 4rem; border-bottom: 1px solid #d8d8d2; }
+.mocksharp-kicker, .mocksharp-section-label { font-size: .72rem; font-weight: 900; letter-spacing: .2em; text-transform: uppercase; color: #67675f; }
+.mocksharp-hero h1 { margin: 1.5rem 0 1rem; font-size: clamp(3rem, 7vw, 6.5rem); line-height: .94; letter-spacing: -.075em; font-weight: 900; }
+.mocksharp-hero h1 span { background: #dfff00; padding: 0 .12em; }
+.mocksharp-hero p { color: #686861; font-size: 1.05rem; }
+.mocksharp-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: clamp(2rem, 7vw, 7rem); padding: 4rem 0; }
+.mocksharp-step-list { border-left: 1px solid #c8c8c0; height: fit-content; }
+.mocksharp-step { display: flex; gap: .9rem; padding: 0 0 2rem 1.2rem; color: #aaa9a0; position: relative; }
+.mocksharp-step::before { content: ''; position: absolute; left: -4px; top: 4px; width: 7px; height: 7px; background: #c8c8c0; border-radius: 50%; }
+.mocksharp-step.active { color: #171717; }.mocksharp-step.active::before { background: #dfff00; box-shadow: 0 0 0 4px #f4f4f0; }
+.mocksharp-step span { font-size: .7rem; font-weight: 800; }.mocksharp-step b { display: block; font-size: 1.05rem; }.mocksharp-step small { display: block; margin-top: .35rem; color: #8a8980; font-size: .75rem; }
+.mocksharp-form { display: grid; gap: 2.4rem; max-width: 720px; }
+.mocksharp-field label { display: block; margin-bottom: .8rem; font-size: .72rem; font-weight: 900; letter-spacing: .16em; color: #77766e; text-transform: uppercase; }
+.mocksharp-options { display: flex; flex-wrap: wrap; gap: .65rem; }.mocksharp-options button, .mocksharp-topic-options button { border: 1px solid #c9c9c1; background: transparent; transition: .2s; }.mocksharp-options button { padding: .75rem 1.15rem; font-weight: 800; }.mocksharp-options button:hover, .mocksharp-options button.selected { background: #dfff00; border-color: #dfff00; color: #111; }
+.mocksharp-topic-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }.mocksharp-topic-options button { text-align: left; padding: 1rem; min-height: 6rem; }.mocksharp-topic-options button strong, .mocksharp-topic-options button span { display: block; }.mocksharp-topic-options button span { margin-top: .5rem; color: #77766e; font-size: .75rem; line-height: 1.4; }.mocksharp-topic-options button.selected { background: #171717; border-color: #171717; color: white; }.mocksharp-topic-options button.selected span { color: #c7c7bd; }
+.mocksharp-primary { width: 100%; border: 0; background: #171717; color: white; padding: 1.1rem 1.4rem; font-weight: 900; font-size: 1rem; cursor: pointer; transition: transform .2s, background .2s; }.mocksharp-primary:hover { background: #333; transform: translateY(-2px); }.mocksharp-primary:disabled { opacity: .5; cursor: wait; transform: none; }.mocksharp-primary.compact { width: auto; }.mocksharp-secondary { border: 1px solid #c9c9c1; background: transparent; padding: .8rem 1rem; font-weight: 800; }
+.mocksharp-error { padding: .8rem 1rem; background: #fff0ed; border-left: 3px solid #e25b45; color: #9b3425; font-size: .85rem; }.mocksharp-generated { background: #e9f0b2; padding: 1.5rem; }.mocksharp-generated-label { font-size: .7rem; letter-spacing: .14em; font-weight: 900; text-transform: uppercase; }.mocksharp-generated p { white-space: pre-wrap; line-height: 1.8; margin: .8rem 0 1.3rem; }.mocksharp-recent { border-top: 1px solid #d8d8d2; padding-top: 2rem; }
+@media (max-width: 720px) { .mocksharp-home { padding: 2rem 1rem 3rem; }.mocksharp-workspace { grid-template-columns: 1fr; padding: 2.5rem 0; gap: 2rem; }.mocksharp-step-list { display: grid; grid-template-columns: repeat(4, 1fr); border-left: 0; border-bottom: 1px solid #c8c8c0; }.mocksharp-step { padding: 0 0 .8rem; display: block; }.mocksharp-step::before { left: 0; top: auto; bottom: -4px; }.mocksharp-step div { display: none; }.mocksharp-topic-options { grid-template-columns: 1fr; } }
 
 .typing-indicator span {
   display: inline-block;

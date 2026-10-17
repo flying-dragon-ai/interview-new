@@ -1,12 +1,13 @@
 import {
   createModels,
   createProvider,
-  envApiKeyAuth,
   type Context,
   type Model,
   type MutableModels,
   type TextContent,
 } from '@earendil-works/pi-ai';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
 /**
@@ -17,12 +18,22 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
  * （默认 DeepSeek 官方；任意 OpenAI 兼容端点均可，如 Kimi/Moonshot）。
  */
 
-const PROVIDER_ID = 'unified-llm';
+// 使用独立 ID，避免 pi-ai 复用此前缓存的旧 unified-llm 凭证。
+const PROVIDER_ID = 'local-newapi-llm';
 const DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
 const DEFAULT_MODEL = 'deepseek-chat';
 
+function localEnv(name: string): string | undefined {
+  // 只在 Vercel Dev/部署函数中读取本地配置；测试和普通 Node 调用不应被开发机密钥污染。
+  if (process.env.LGD_TEST_MODE === '1' || (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV && (process.argv.some((arg) => arg.includes('--test') || arg.includes('/tests/') || arg.startsWith('tests/')) || process.env.NODE_TEST_CONTEXT))) return undefined;
+  try {
+    const line = readFileSync(join(process.cwd(), '.env.local'), 'utf8').split(/\r?\n/).find((item) => item.startsWith(`${name}=`));
+    return line?.slice(name.length + 1).trim().replace(/^['"]|['"]$/g, '') || undefined;
+  } catch { return undefined; }
+}
+
 function getApiKey(): string {
-  const key = process.env.DEEPSEEK_API_KEY;
+  const key = localEnv('LOCAL_LLM_API_KEY') || process.env.LOCAL_LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
   if (!key || !key.trim()) {
     throw new Error('DEEPSEEK_API_KEY 未配置（服务端环境变量）');
   }
@@ -30,22 +41,23 @@ function getApiKey(): string {
 }
 
 export function isLlmConfigured(): boolean {
-  return Boolean(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY.trim());
+  const key = localEnv('LOCAL_LLM_API_KEY') || process.env.LOCAL_LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
+  return Boolean(key && key.trim());
 }
 
 /** base URL：env 允许填到 .../chat/completions，统一归一化为 /v1 根（pi-ai 自行拼接端点路径） */
 function getBaseUrl(): string {
-  const raw = (process.env.DEEPSEEK_BASE_URL && process.env.DEEPSEEK_BASE_URL.trim()) || DEFAULT_BASE_URL;
+  const raw = (localEnv('LOCAL_LLM_BASE_URL') || process.env.LOCAL_LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || '').trim() || DEFAULT_BASE_URL;
   return raw.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 }
 
 function getModelId(): string {
-  return (process.env.DEEPSEEK_MODEL && process.env.DEEPSEEK_MODEL.trim()) || DEFAULT_MODEL;
+  return (localEnv('LOCAL_LLM_MODEL') || process.env.LOCAL_LLM_MODEL || process.env.DEEPSEEK_MODEL || '').trim() || DEFAULT_MODEL;
 }
 
 /** 温度覆盖：部分模型（如 Kimi k2/k3）仅允许 temperature=1，用 DEEPSEEK_TEMPERATURE 强制统一值 */
 function getTemperature(requested: number): number {
-  const override = process.env.DEEPSEEK_TEMPERATURE;
+  const override = localEnv('LOCAL_LLM_TEMPERATURE') || process.env.LOCAL_LLM_TEMPERATURE || process.env.DEEPSEEK_TEMPERATURE;
   if (override && override.trim()) {
     const v = Number(override.trim());
     if (!Number.isNaN(v)) return v;
@@ -55,7 +67,7 @@ function getTemperature(requested: number): number {
 
 /** max_tokens 覆盖：推理模型（如 kimi-k3）思考链可占数千 token，默认 8192 易被吃光导致正文为空 */
 function getMaxTokens(): number {
-  const v = process.env.DEEPSEEK_MAX_TOKENS;
+  const v = localEnv('LOCAL_LLM_MAX_TOKENS') || process.env.LOCAL_LLM_MAX_TOKENS || process.env.DEEPSEEK_MAX_TOKENS;
   if (v && v.trim()) {
     const n = Number(v.trim());
     if (!Number.isNaN(n) && n > 0) return n;
@@ -69,7 +81,7 @@ function getMaxTokens(): number {
  * 设 low 后约 15s；不设则按非推理模型处理（DeepSeek 官方行为不变）。
  */
 function getReasoningLevel(): 'low' | 'medium' | 'high' | null {
-  const v = process.env.DEEPSEEK_REASONING?.trim();
+  const v = (localEnv('LOCAL_LLM_REASONING') || process.env.LOCAL_LLM_REASONING || process.env.DEEPSEEK_REASONING)?.trim();
   if (v === 'low' || v === 'medium' || v === 'high') return v;
   return null;
 }
@@ -105,7 +117,12 @@ function getRuntime(): LlmRuntime {
       id: PROVIDER_ID,
       name: 'Unified LLM (pi-ai)',
       baseUrl,
-      auth: { apiKey: envApiKeyAuth('LLM API key', ['DEEPSEEK_API_KEY']) },
+      auth: {
+        apiKey: {
+          name: 'LLM API key',
+          resolve: async () => ({ auth: { apiKey: getApiKey() }, source: 'server environment' }),
+        },
+      },
       models: [modelDef],
       api: openAICompletionsApi(),
     });

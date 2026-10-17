@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { generateTopicStream } from '../services/geminiService';
-import { ROLE_CARDS, inferIndustry, cardDisplayRole } from '../data/roleCards';
+import { cardDisplayRole } from '../data/roleCards';
 import { findAvatarPreset } from '../data/avatars';
-import { autoSelectRoles, validateSelection, resolveRoleCards } from '../engine/roleSelector';
-import { TOPIC_TYPES } from '../constants';
+import { autoSelectRolesForTopic } from '../engine/roleSelector';
+import { pickBankQuestion } from '../data/questionBank';
+import { INTERVIEW_INDUSTRIES, INTERVIEW_JOBS, TOPIC_TYPES } from '../constants';
 import type { RoleCard } from '../types';
 
 /**
@@ -29,28 +30,22 @@ const ROLE_BADGE: Record<string, { label: string; className: string }> = {
 
 const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   const [topic, setTopic] = useState('');
-  const [jobTitle, setJobTitle] = useState('');
+  const [jobTitle, setJobTitle] = useState('产品经理');
   const [company, setCompany] = useState('');
   const [topicType, setTopicType] = useState<string>('business_case');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [industry, setIndustry] = useState<string>('internet');
+  const [jobKey, setJobKey] = useState<string>('product_manager');
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const selectedCards = resolveRoleCards(selectedIds);
-  const violations = validateSelection(selectedCards);
+  const selectedCards = useMemo(() => {
+    const selectedIndustry = INTERVIEW_INDUSTRIES.find((item) => item.value === industry)?.roleIndustry ?? 'tech';
+    return autoSelectRolesForTopic(selectedIndustry, topicType, 20261017);
+  }, [industry, topicType]);
 
-  const toggleCard = (id: string) => {
-    setSelectedIds((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 3) return prev; // 最多 3 张
-      return [...prev, id];
-    });
-  };
-
-  const handleAutoSelect = () => {
-    const industry = inferIndustry(jobTitle || company);
-    const cards = autoSelectRoles(industry, Date.now() % 100000);
-    setSelectedIds(cards.map((c) => c.id));
-  };
+  const bankQuestion = useMemo(() => {
+    const selectedIndustry = INTERVIEW_INDUSTRIES.find((item) => item.value === industry)?.roleIndustry ?? 'tech';
+    return pickBankQuestion(selectedIndustry as 'tech' | 'fmcg' | 'finance' | 'manufacturing', jobKey, topicType as 'priority_ranking' | 'business_case' | 'open_debate');
+  }, [industry, jobKey, topicType]);
 
   const handleGenerate = async () => {
     if (!company || !jobTitle) {
@@ -64,34 +59,41 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
       setTopic(cleaned || '请手动输入题目');
     } catch (error) {
       console.error(error);
-      setTopic('题目生成失败，请手动输入。');
+      setTopic(bankQuestion?.title ?? '题目生成失败，请手动输入。');
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const useBankQuestion = () => {
+    if (bankQuestion) setTopic(bankQuestion.title);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!topic || !jobTitle || !company) return;
-    if (selectedCards.length !== 3) {
-      alert('请选择 3 个面试官角色（或点击随机分配）');
-      return;
-    }
-    if (violations.length > 0) {
-      alert(`角色组合不满足约束：${violations.map((v) => v.message).join('；')}`);
-      return;
-    }
     onStart({ topic, jobTitle, company, topicType, roles: selectedCards });
   };
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-      <div className="bg-blue-600 px-8 py-6">
-        <h1 className="text-2xl font-bold text-white text-center">开始练习</h1>
-        <p className="text-blue-100 text-center text-sm mt-1">填写信息 · 选择面试官形象 · 生成专属题目</p>
+      <div className="bg-[#efff00] px-8 py-8">
+        <div className="text-xs font-black tracking-[0.28em] text-slate-950/60 uppercase">MOCK GROUP INTERVIEW</div>
+        <h1 className="text-3xl font-black text-slate-950 text-left mt-3">一个人，也能开一场群面</h1>
+        <p className="text-slate-800/70 text-sm mt-2">先选行业、岗位和题型，进入多人 AI 群面流程。</p>
       </div>
 
       <form onSubmit={handleSubmit} className="p-8 space-y-6">
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">第一步：选择行业</label>
+          <div className="flex flex-wrap gap-2">
+            {INTERVIEW_INDUSTRIES.map((item) => (
+              <button key={item.value} type="button" onClick={() => setIndustry(item.value)} className={`px-4 py-2 rounded-full border text-sm font-semibold transition ${industry === item.value ? 'border-lime-400 bg-lime-300 text-slate-950' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`}>{item.label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="text-xs font-black tracking-widest text-slate-500 uppercase">Step 02 · 岗位与公司</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">目标公司</label>
@@ -106,19 +108,14 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           </div>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">应聘岗位</label>
-            <input
-              type="text"
-              value={jobTitle}
-              onChange={(e) => setJobTitle(e.target.value)}
-              placeholder="如：产品经理、运营专员"
-              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition"
-              required
-            />
+            <select value={jobKey} onChange={(e) => { setJobKey(e.target.value); setJobTitle(INTERVIEW_JOBS.find((job) => job.value === e.target.value)?.label ?? ''); }} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 outline-none">
+              {INTERVIEW_JOBS.map((job) => <option key={job.value} value={job.value}>{job.label}</option>)}
+            </select>
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">题目类型</label>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">第三步：选择群面题型</label>
           <select
             value={topicType}
             onChange={(e) => setTopicType(e.target.value)}
@@ -132,52 +129,30 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           </select>
         </div>
 
-        {/* 角色选择（12 角色卡抽 3） */}
+        {/* 角色预览：由行业 + 题型自动分配 */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-sm font-semibold text-slate-700">
-              选择面试官形象（{selectedIds.length}/3）
-            </label>
-            <button
-              type="button"
-              onClick={handleAutoSelect}
-              className="text-sm text-blue-600 hover:underline font-medium"
-            >
-              随机分配（按岗位匹配）
-            </button>
+            <label className="block text-sm font-semibold text-slate-700">本场 AI 队友</label>
+            <span className="text-xs text-slate-400">自动分配 3 名候选人</span>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto p-1">
-            {ROLE_CARDS.map((card) => {
+          <div className="grid grid-cols-3 gap-2 p-1">
+            {selectedCards.map((card) => {
               const preset = findAvatarPreset(card.avatar.preset_id);
-              const selected = selectedIds.includes(card.id);
               const badge = ROLE_BADGE[cardDisplayRole(card)];
               return (
-                <button
+                <div
                   key={card.id}
-                  type="button"
-                  onClick={() => toggleCard(card.id)}
-                  className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
-                    selected ? 'border-blue-500 bg-blue-50 shadow' : 'border-slate-200 hover:border-slate-300'
-                  }`}
+                  className="flex flex-col items-center p-2 rounded-xl border border-slate-200 bg-slate-50"
                 >
                   <img src={preset?.asset_url} alt={card.name} className="w-12 h-12 rounded-full" />
                   <span className="mt-1 text-xs font-semibold text-slate-700 whitespace-nowrap">{card.name}</span>
                   <span className={`mt-0.5 text-[9px] px-1.5 py-0.5 rounded text-white ${badge.className}`}>{badge.label}</span>
                   <span className="text-[9px] text-slate-400 mt-0.5">{card.industry}</span>
-                </button>
+                </div>
               );
             })}
           </div>
-          {selectedIds.length > 0 && violations.length > 0 && (
-            <div className="mt-2 text-xs text-amber-600 space-y-0.5">
-              {violations.map((v) => (
-                <div key={v.rule}>⚠️ {v.message}</div>
-              ))}
-            </div>
-          )}
-          {selectedIds.length === 3 && violations.length === 0 && (
-            <div className="mt-2 text-xs text-emerald-600">✅ 组合满足约束：音色/形象/策略不重复，性格互补</div>
-          )}
+          <div className="mt-2 text-xs text-slate-500">固定参与者：3 名 AI 候选人、1 名 AI 面试官、你。</div>
         </div>
 
         <button
@@ -199,6 +174,10 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           )}
         </button>
 
+        <button type="button" onClick={useBankQuestion} disabled={!bankQuestion || isGenerating} className="w-full py-3 border border-slate-300 text-slate-700 rounded-lg font-semibold hover:border-slate-500 disabled:opacity-50 transition">
+          使用题库题目进入面试
+        </button>
+
         {topic && (
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">群面题目</label>
@@ -214,7 +193,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
         {topic && (
           <button
             type="submit"
-            disabled={selectedCards.length !== 3 || violations.length > 0}
+            disabled={selectedCards.length !== 3}
             className="w-full py-4 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition text-base disabled:opacity-40"
           >
             下一步：设备检测

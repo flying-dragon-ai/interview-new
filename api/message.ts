@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getPool, isDatabaseConfigured } from './_lib/db.ts';
+import { getPool, isDatabaseConfigured } from './_lib/db.js';
 
 /**
  * 消息落库（PRD D.2：conversation_records → transcripts）
@@ -18,6 +18,15 @@ interface MessageBody {
   end_ms?: number;
   confidence?: number;
   stepfun_segment_id?: string | null;
+  phase_id?: string | null;
+  participant_type?: 'user' | 'candidate' | 'interviewer';
+  turn_index?: number;
+  is_interruption?: boolean;
+  is_question?: boolean;
+  is_answer?: boolean;
+  is_summary?: boolean;
+  reply_to_message_id?: string | null;
+  audio_status?: string | null;
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -38,8 +47,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
       let row: any;
       try {
         const result = await pool.query(
-          `INSERT INTO transcripts (session_id, speaker, speaker_type, speaker_id, speaker_name, message, round, start_ms, end_ms, confidence, stepfun_segment_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+          `INSERT INTO transcripts (session_id, speaker, speaker_type, speaker_id, speaker_name, message, round, start_ms, end_ms, confidence, stepfun_segment_id, phase_id, participant_type, turn_index, is_interruption, is_question, is_answer, is_summary, reply_to_message_id, audio_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
           [
             Number(body.session_id),
             speaker,
@@ -52,6 +61,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
             typeof body.end_ms === 'number' ? body.end_ms : null,
             typeof body.confidence === 'number' ? body.confidence : null,
             body.stepfun_segment_id ?? null,
+            body.phase_id ?? null,
+            body.participant_type ?? (speakerType === 'user' ? 'user' : 'candidate'),
+            body.turn_index ?? body.round ?? 1,
+            Boolean(body.is_interruption),
+            Boolean(body.is_question),
+            Boolean(body.is_answer),
+            Boolean(body.is_summary),
+            body.reply_to_message_id ?? null,
+            body.audio_status ?? null,
           ]
         );
         row = result.rows[0];

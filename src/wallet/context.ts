@@ -14,11 +14,19 @@ export interface WalletIdentity {
   isLoading: boolean;
   /** 归一化小写 EVM 地址；未连接为 null */
   address: string | null;
+  chainId: number | null;
   source: 'embedded' | 'external' | null;
   /** 打开 Para 连接弹窗（未配置时为 no-op） */
-  connect: () => void;
+  connect: () => void | Promise<void>;
   /** 断开 / 登出（未配置时为 no-op） */
   disconnect: () => void;
+  switchToMonadTestnet: () => Promise<void>;
+  issueCredential: (input: {
+    sessionHash: `0x${string}`;
+    scoreHash: `0x${string}`;
+    overallScore: number;
+    skillHashes: `0x${string}`[];
+  }) => Promise<{ txHash: `0x${string}`; tokenId: string | null }>;
 }
 
 export const anonymousIdentity: WalletIdentity = {
@@ -26,9 +34,12 @@ export const anonymousIdentity: WalletIdentity = {
   isConnected: false,
   isLoading: false,
   address: null,
+  chainId: null,
   source: null,
   connect: () => undefined,
   disconnect: () => undefined,
+  switchToMonadTestnet: async () => undefined,
+  issueCredential: async () => { throw new Error('钱包服务尚未配置'); },
 };
 
 export const WalletIdentityContext = createContext<WalletIdentity>(anonymousIdentity);

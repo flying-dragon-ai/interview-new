@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🎯 群面模拟器
+# 🎯 群证｜AI 群面训练与能力证明
 
-**专业、高压、实战。模拟互联网大厂群面环境。**
+**从多人群面训练到可验证的能力成果。**
 
 [![React](https://img.shields.io/badge/React-19.2.3-61DAFB?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.2-3178C6?logo=typescript)](https://www.typescriptlang.org/)
@@ -11,6 +11,65 @@
 
 </div>
 ---
+
+## Monad Blitz MVP
+
+群证面向通用求职场景，支持行业、公司、岗位和题型筛选，使用预设题目开展多人 AI 群面，并基于发言和讨论事件生成带证据的复盘报告。用户可将报告摘要留存在本地，或主动发布到 Monad Testnet，生成不可转让的 Interview Credential。
+
+### 数据边界
+
+- 群面消息、录音、公司名称和完整报告保留在链下。
+- 用户确认后，合约只记录 session hash、带随机盐的 score hash、总分、能力标签哈希和时间戳。
+- 钱包连接是可选的；不连接钱包仍可完成练习与复盘。
+- 链上记录公开且不可删除，发布前会在报告页展示字段并要求确认。
+
+### 本地运行
+
+```bash
+pnpm install
+cp .env.example .env.local
+# 配置服务端 LLM / StepFun 环境变量；钱包与合约配置见下方
+pnpm dev
+```
+
+已部署 Monad Testnet 合约地址需要配置。钱包可以使用 Para 嵌入式钱包（可选）或浏览器注入钱包（如 MetaMask）：
+
+```dotenv
+VITE_INTERVIEW_CREDENTIAL_ADDRESS=
+# 可选：启用 Para 嵌入式钱包
+VITE_PARA_API_KEY=
+```
+
+没有配置合约地址或安装钱包时，训练和报告仍可使用；链上发布会显示明确的配置提示。
+
+### 合约编译、测试和部署
+
+```bash
+pnpm contracts:compile
+pnpm contracts:test
+```
+
+Foundry 测试覆盖：记录评分、发行凭证、重复评估拒绝、未授权铸造拒绝、不可转让和分数范围校验。部署目标为 Monad Testnet（Chain ID `10143`）：
+
+```bash
+pnpm contracts:deploy:testnet
+```
+
+部署脚本使用 Foundry 编译，并通过 monskills 规定的 Alchemy Agent Wallet session 调用 CreateX。它会先校验网络、CreateX 地址代码和 CREATE2 预测地址。部署完成后将脚本显示的地址写入 `VITE_INTERVIEW_CREDENTIAL_ADDRESS`，并按 `docs/monad-credential-mvp.md` 执行浏览器验证和更新部署信息。
+
+### 参赛交付状态
+
+| 项目 | 当前状态 |
+| --- | --- |
+| Web Demo | 本地可运行；公网 URL 待部署后补充 |
+| Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待部署 |
+| GitHub 仓库 | 当前工作目录尚未配置公开远端 |
+| 合约验证 / 交易链接 | 部署后写入本节 |
+| 演示流程 | `docs/DEMO_SCRIPT.md` |
+
+README 中的部署地址、公开仓库和公网 Demo 必须以真实部署结果填充，当前不填入虚构数据。
+
+详细实现、证明文件格式和链上隐私边界见 [`docs/monad-credential-mvp.md`](./docs/monad-credential-mvp.md)。
 
 ## 🆕 v0.7-tow 升级说明（语音化 + 真实计时 + 安全债清偿）
 
@@ -51,7 +110,10 @@ pnpm verify                  # 密钥扫描 + typecheck + 测试 + 构建 + TC-0
 
 ```bash
 psql "$DATABASE_URL" -f db/migration-v0.7.sql
+psql "$DATABASE_URL" -f db/migration-v0.10-onchain-assessments.sql
 ```
+
+`migration-v0.10-onchain-assessments.sql` 新增已确认 Monad 交易的幂等索引（钱包、哈希、总分、能力标签哈希、网络/合约、交易与 Token ID），不保存转写或报告原文。
 
 迁移内容（PRD 附录 D）：`simulation_sessions→sessions`（+roles JSONB 等）、`conversation_records→transcripts`（+时间戳/置信度）、`feedback_reports→reports`（+dimension_scores/evidence_pool/suggestions JSONB）、新增 `events`/`visual_features`/`avatars` 表与索引。**执行前务必完成 D1/D2 凭据轮换（旧凭据视为已泄露）**。
 

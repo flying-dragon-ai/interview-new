@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import SetupForm from './components/SetupForm';
+import QuestionBankHome from './components/QuestionBankHome';
 import DeviceCheck, { type DeviceCheckResult } from './components/DeviceCheck';
+import QuestionBriefing from './components/QuestionBriefing';
 import VoiceRoom from './components/VoiceRoom';
 import EvidenceReport from './components/EvidenceReport';
 import FeedbackReport from './components/FeedbackReport';
 import PrivacyPolicy from './components/PrivacyPolicy';
-import WalletButton from './components/WalletButton';
-import { useWalletIdentity } from './src/wallet/context';
 import { SimulationState, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
 import { generateReportV15, generateFeedback } from './services/geminiService';
 import {
@@ -16,10 +15,12 @@ import {
   saveReport,
   triggerAnalyze,
 } from './src/api';
+import type { PhaseState } from './engine/phaseEngine';
+import { buildRuleReport } from './engine/reportEngine';
 
 /**
  * 应用主流程（PRD 5.2 目标流程）
- * SetupForm → DeviceCheck → VoiceRoom（倒计时四阶段）→ EvidenceReport（v1.5）
+ * SetupForm → DeviceCheck → VoiceRoom（MockSharp 八阶段）→ EvidenceReport（v1.5）
  * 降级路径：无麦克风 → 纯文字；无摄像头 → 纯语音；弱网 → 纯语音/纯文字。
  */
 
@@ -35,6 +36,7 @@ const App: React.FC = () => {
   });
   const [roles, setRoles] = useState<RoleCard[]>([]);
   const [topicType, setTopicType] = useState('business_case');
+  const [demoMode, setDemoMode] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [consent, setConsent] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
@@ -49,20 +51,21 @@ const App: React.FC = () => {
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
-  // Q-N1：Para 钱包地址作为免登录用户标识（未配置 Para 时恒为匿名）
-  const wallet = useWalletIdentity();
 
   // ---- 准备页 → 设备检测 ----
-  const startPreparation = (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[] }) => {
+  const [resumeCheckpoint, setResumeCheckpoint] = useState<PhaseState | null>(null);
+  const startPreparation = (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[]; resumeCheckpoint?: PhaseState | null; demoMode?: boolean }) => {
     setState((prev) => ({
       ...prev,
       topic: params.topic,
       jobTitle: params.jobTitle,
       company: params.company,
-      status: 'PREPARING',
+      status: 'BRIEFING',
     }));
     setRoles(params.roles);
     setTopicType(params.topicType);
+    setDemoMode(params.demoMode ?? false);
+    setResumeCheckpoint(params.resumeCheckpoint ?? null);
   };
 
   // ---- 设备检测完成 → 创建会话 → 进入房间 ----
@@ -80,7 +83,7 @@ const App: React.FC = () => {
       roles: roles.map((r) => r.id),
       voiceEnabled: result.voiceEnabled,
       cameraEnabled: result.cameraEnabled,
-      walletAddress: wallet.address,
+      walletAddress: null,
     });
     if (session) {
       setSessionId(session.id);
@@ -95,6 +98,11 @@ const App: React.FC = () => {
   // ---- 群面结束 → 面后分析 → 报告 v1.5 ----
   const finishSimulation = async (history: Message[], events: GameEvent[], startedAt: number) => {
     setState((prev) => ({ ...prev, status: 'FINISHED', messages: history }));
+    try { localStorage.removeItem(`lgd-checkpoint:${state.topic}`); } catch { /* best effort */ }
+    try {
+      const items = JSON.parse(localStorage.getItem('lgd-practice-history') || '[]');
+      localStorage.setItem('lgd-practice-history', JSON.stringify(items.map((item: { topic?: string }) => item.topic === state.topic ? { ...item, status: 'finished', finishedAt: Date.now() } : item)));
+    } catch { /* local history is best effort */ }
     setFinishedMessages(history);
     setFinishedEvents(events);
     setSessionStartAt(startedAt);
@@ -110,21 +118,32 @@ const App: React.FC = () => {
       (async () => {
         try {
           let reportV15: ReportV15 | null = null;
-          if (sessionId && consent) {
+          if (demoMode) {
+            reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs });
+          } else if (sessionId && consent) {
             reportV15 = await triggerAnalyze(sessionId);
           }
           if (!reportV15) {
-            reportV15 = await generateReportV15({
-              topic: state.topic,
-              jobTitle: state.jobTitle,
-              messages: history,
-              events,
-              sessionStartAt: startedAt,
-              durationMs,
-              sessionId,
-            });
+            try {
+              reportV15 = await generateReportV15({
+                topic: state.topic,
+                jobTitle: state.jobTitle,
+                messages: history,
+                events,
+                sessionStartAt: startedAt,
+                durationMs,
+                sessionId,
+              });
+            } catch (error) {
+              console.warn('在线报告不可用，切换本地规则评分:', error);
+              reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs });
+            }
           }
           setReport(reportV15);
+          try {
+            const items = JSON.parse(localStorage.getItem('lgd-practice-history') || '[]');
+            localStorage.setItem('lgd-practice-history', JSON.stringify(items.map((item: { topic?: string }) => item.topic === state.topic ? { ...item, status: 'finished', score: reportV15?.overall_score, finishedAt: Date.now() } : item)));
+          } catch { /* local history is best effort */ }
           if (sessionId && consent) {
             saveReport({ sessionId, report: reportV15 });
           }
@@ -137,6 +156,7 @@ const App: React.FC = () => {
 
     tasks.push(
       (async () => {
+        if (demoMode) return;
         try {
           const legacy = await generateFeedback(state.topic, state.jobTitle, history);
           setLegacyFeedback(legacy);
@@ -159,6 +179,15 @@ const App: React.FC = () => {
     return deleteSession(id);
   };
 
+  const interruptSimulation = () => {
+    try {
+      const items = JSON.parse(localStorage.getItem('lgd-practice-history') || '[]');
+      localStorage.setItem('lgd-practice-history', JSON.stringify(items.map((item: { topic?: string }) => item.topic === state.topic ? { ...item, status: 'interrupted', interruptedAt: Date.now() } : item)));
+    } catch { /* local history is best effort */ }
+    if (sessionId) updateSessionStatus(sessionId, 'INTERRUPTED');
+    setState((prev) => ({ ...prev, status: 'INTERRUPTED' }));
+  };
+
   const restart = () => {
     setState({
       topic: '',
@@ -179,21 +208,20 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* 顶部导航 */}
-      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <div className="text-lg font-bold text-blue-600">LGD Simulator</div>
+      {/* MockSharp 风格顶部导航 */}
+      <div className="bg-[#171717] text-white px-5 md:px-8 py-4">
+        <div className="max-w-[1180px] mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-3"><div className="w-3 h-3 bg-[#dfff00] rounded-full" /><div className="text-sm font-black tracking-[.08em]">把面试记录永久留存</div></div>
           <div className="flex items-center gap-4">
             {!dbAvailable && state.status !== 'IDLE' && (
-              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                <span className="text-[10px] text-[#dfff00] border border-white/20 rounded-full px-2 py-0.5">
                 本地模式（未配置数据库）
               </span>
             )}
-            <WalletButton />
-            <button onClick={() => setShowPrivacy(true)} className="text-sm text-slate-500 hover:text-blue-600">
+            <button onClick={() => setShowPrivacy(true)} className="text-sm text-white/60 hover:text-[#dfff00]">
               隐私政策
             </button>
-            <button onClick={restart} className="text-sm text-blue-600 hover:underline">
+            <button onClick={restart} className="text-sm font-bold text-[#dfff00] hover:underline">
               新建练习
             </button>
           </div>
@@ -204,8 +232,12 @@ const App: React.FC = () => {
       <div className={state.status === 'DISCUSSING' ? 'h-[calc(100vh-57px)]' : 'p-4 md:p-6'}>
         {state.status === 'IDLE' && (
           <div className="max-w-3xl mx-auto">
-            <SetupForm onStart={startPreparation} />
+            <QuestionBankHome onStart={startPreparation} />
           </div>
+        )}
+
+        {state.status === 'BRIEFING' && (
+          <QuestionBriefing state={state} topicType={topicType} onContinue={() => setState((prev) => ({ ...prev, status: 'PREPARING' }))} onBack={restart} />
         )}
 
         {state.status === 'PREPARING' && (
@@ -224,8 +256,19 @@ const App: React.FC = () => {
               cameraEnabled={cameraEnabled}
               facingMode={facingMode}
               onFinish={finishSimulation}
-              onExit={restart}
+              onExit={interruptSimulation}
+              resumeCheckpoint={resumeCheckpoint}
+              demoMode={demoMode}
             />
+          </div>
+        )}
+
+        {state.status === 'INTERRUPTED' && (
+          <div className="max-w-xl mx-auto bg-white rounded-3xl border border-amber-200 shadow-sm p-8 text-center">
+            <div className="text-4xl mb-4">⏸</div>
+            <h2 className="text-2xl font-black text-slate-900">本次练习已中断</h2>
+            <p className="text-sm text-slate-500 mt-3 leading-6">本次练习已标记为中断，未完成的聊天和事件不会被伪装成完整报告。</p>
+            <button type="button" onClick={restart} className="mt-6 rounded-xl bg-slate-950 text-white px-6 py-3 font-black">返回题库大厅</button>
           </div>
         )}
 

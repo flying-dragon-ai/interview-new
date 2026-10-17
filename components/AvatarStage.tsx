@@ -10,6 +10,7 @@ import { cardDisplayRole } from '../data/roleCards';
 
 interface AvatarStageProps {
   cards: RoleCard[];
+  interviewerCard?: RoleCard | null;
   /** 当前被调度发言的角色（发言权） */
   activeCardId: string | null;
   /** 正在 TTS 播报的角色 */
@@ -36,6 +37,7 @@ const EMOTION_EMOJI: Record<string, string> = {
 
 const AvatarStage: React.FC<AvatarStageProps> = ({
   cards,
+  interviewerCard,
   activeCardId,
   speakingCardId,
   cameraEnabled = false,
@@ -83,6 +85,14 @@ const AvatarStage: React.FC<AvatarStageProps> = ({
           </div>
         );
       })}
+
+      {interviewerCard && (
+        <div className="relative flex flex-col items-center p-3 rounded-xl bg-white border-2 border-slate-300 min-w-[92px] shrink-0">
+          <div className="w-14 h-14 rounded-full bg-slate-800 text-white flex items-center justify-center text-xl">面</div>
+          <span className="mt-2 text-xs font-semibold text-slate-700 whitespace-nowrap">面试官</span>
+          <span className="mt-1 text-[9px] px-1.5 py-0.5 rounded text-white bg-slate-700">提问 / 控场</span>
+        </div>
+      )}
 
       {/* 用户小窗 */}
       <div className="flex flex-col items-center p-3 rounded-xl bg-slate-900 text-white min-w-[92px] shrink-0 border-2 border-slate-900">

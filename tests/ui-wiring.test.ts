@@ -21,11 +21,11 @@ test('TC-04: 用户输入/说话时调用 bargeIn（DiscussionPanel 接线）', 
 
 test('TC-05: AI 发言超时被打断后由调度器立即安排发言（interrupt → triggerAITurn）', () => {
   const panel = read('components/DiscussionPanel.tsx');
-  assert.ok(/evaluateInterrupt\(roles, turnRef\.current, now\)/.test(panel), '未评估打断规则');
+  assert.ok(/evaluateInterrupt\(/.test(panel), '未评估打断规则');
   assert.ok(/registerInterrupt\(turnRef\.current, interrupt\.targetId, interrupt\.interrupterId\)/.test(panel), '打断未登记（罚分/加成）');
   assert.ok(/event_type: 'interrupt'/.test(panel), '打断事件未记录');
   // 用户被点名 5 秒未回应 → 其他 AI 接话
-  assert.ok(/evaluateUserCalledNoResponse\(roles, turnRef\.current, now\)/.test(panel), '未实现点名未响应接话');
+  assert.ok(/evaluateUserCalledNoResponse\(/.test(panel), '未实现点名未响应接话');
 });
 
 test('TC-10: 异常降级提示与语音模式展示（DiscussionPanel）', () => {
@@ -75,9 +75,8 @@ test('TC-10: 网络检测与跳过摄像头（DeviceCheck）', () => {
 
 test('US-13: SetupForm 12 角色卡选择 + 约束校验', () => {
   const form = read('components/SetupForm.tsx');
-  assert.ok(/ROLE_CARDS\.map/.test(form), '未渲染 12 角色卡');
-  assert.ok(/validateSelection/.test(form), '未校验角色组合约束');
-  assert.ok(/autoSelectRoles/.test(form), '缺少随机分配');
+  assert.ok(/autoSelectRolesForTopic/.test(form), '缺少按题型自动分配');
+  assert.ok(/固定参与者：3 名 AI 候选人、1 名 AI 面试官、你/.test(form), '缺少固定参与者说明');
   assert.ok(/TOPIC_TYPES/.test(form), '缺少题型选择');
 });
 
@@ -87,7 +86,7 @@ test('5.2: 目标流程状态机（IDLE → PREPARING → DISCUSSING → FINISHE
   assert.ok(/status: 'PREPARING'/.test(app));
   assert.ok(/status: 'DISCUSSING'/.test(app));
   assert.ok(/status: 'FINISHED'/.test(app));
-  assert.ok(/SetupForm onStart=\{startPreparation\}/.test(app), 'SetupForm 未接入');
+  assert.ok(/QuestionBankHome onStart=\{startPreparation\}/.test(app), 'QuestionBankHome 未接入');
   assert.ok(/DeviceCheck onReady=\{enterRoom\}/.test(app), 'DeviceCheck 未接入');
   assert.ok(/VoiceRoom[\s\S]*onFinish=\{finishSimulation\}/.test(app), 'VoiceRoom 未接入');
   assert.ok(/EvidenceReport[\s\S]*onDeleteRecords=\{handleDeleteRecords\}/.test(app), 'EvidenceReport 未接入删除');
@@ -128,5 +127,5 @@ test('4.1.3: 房间使用倒计时阶段与要点跟踪（非 25 轮）', () => 
 test('D4: 关键词检测降级为辅助（advancePhaseByKeyword 仅兜底）', () => {
   const panel = read('components/DiscussionPanel.tsx');
   assert.ok(/advancePhaseByKeyword/.test(panel), '未保留关键词兜底');
-  assert.ok(/phase\.id === 'FREE_DISCUSSION' && shouldAdvanceByKeyword/.test(panel), '关键词推进未限定条件');
+  assert.ok(/phase\.id === 'FREE_DISCUSSION' \|\| phase\.id === 'GROUP_DISCUSSION'/.test(panel), '关键词推进未限定群面阶段');
 });

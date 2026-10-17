@@ -198,7 +198,9 @@ test('/api/llm 限流：同 IP 超频 → 429（Q-N2）', async () => {
 });
 
 test('/api/llm 未配置 key → 500 LLM_NOT_CONFIGURED', async () => {
+  process.env.LGD_TEST_MODE = '1';
   delete process.env.DEEPSEEK_API_KEY;
+  delete process.env.LOCAL_LLM_API_KEY;
   const res = mockRes();
   await handler(mockReq({ action: 'topic', payload: { company: 'a', jobTitle: 'b' } }, '172.16.0.9'), res);
   assert.equal(res.statusCode, 500);

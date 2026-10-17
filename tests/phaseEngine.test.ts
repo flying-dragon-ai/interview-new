@@ -29,6 +29,25 @@ test('PRD 4.1.3: 默认四阶段时长（审题2min/个人陈述每人1min/自�
   assert.equal(OPENING_TURN_MS, 60 * 1000);
 });
 
+test('比赛演示模式：MockSharp 自我介绍按自定义短轮次推进', () => {
+  const demoConfig: PhaseConfig = {
+    phaseSet: 'mocksharp',
+    openingOrder: ['ai-1', 'ai-2', 'ai-3', 'user'],
+    openingTurnMs: 4_000,
+    durationsMs: { SELF_INTRODUCTION: 16_000, READING: 5_000 },
+  };
+  let state = initPhaseEngine(0, demoConfig);
+  assert.equal(currentOpeningSpeaker(state, demoConfig), 'ai-1');
+  state = tickPhase(state, 4_000, demoConfig).state;
+  assert.equal(currentOpeningSpeaker(state, demoConfig), 'ai-2');
+  state = tickPhase(state, 8_000, demoConfig).state;
+  assert.equal(currentOpeningSpeaker(state, demoConfig), 'ai-3');
+  state = tickPhase(state, 12_000, demoConfig).state;
+  assert.equal(currentOpeningSpeaker(state, demoConfig), 'user');
+  state = tickPhase(state, 16_000, demoConfig).state;
+  assert.equal(currentPhase(state, demoConfig).id, 'READING');
+});
+
 test('TC-01: 倒计时到点自动切换阶段（审题→个人陈述→自由讨论→总结→结束）', () => {
   let state = initPhaseEngine(0, config);
   assert.equal(currentPhase(state, config).id, 'READING');

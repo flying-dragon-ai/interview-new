@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getPool, isDatabaseConfigured } from './_lib/db.ts';
-import { resolveRoleCards } from '../engine/roleSelector.ts';
-import { WALLET_ADDRESS_RE, normalizeWalletAddress } from './_lib/wallet.ts';
+import { getPool, isDatabaseConfigured } from './_lib/db.js';
+import { resolveRoleCards } from '../engine/roleSelector.js';
+import { WALLET_ADDRESS_RE, normalizeWalletAddress } from './_lib/wallet.js';
 
 /**
  * 会话管理（PRD E.1 保留 + D.2 迁移）

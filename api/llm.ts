@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { RoleCard } from '../types';
-import { findRoleCard } from '../data/roleCards.ts';
-import { buildReplyPrompt, buildTopicPrompt, buildAnalysisPrompt, type HistoryItem, type ReplyPayload } from './_lib/prompts.ts';
-import { callDeepSeek, callDeepSeekStream, isLlmConfigured } from './_lib/llm.ts';
-import { createSseWriter } from './_lib/sse.ts';
-import { checkRateLimit } from './_lib/ratelimit.ts';
-import { extractJsonStringField, safeJsonParse } from './_lib/jsonStream.ts';
-import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../engine/reportEngine.ts';
+import { findRoleCard } from '../data/roleCards.js';
+import { buildReplyPrompt, buildTopicPrompt, buildAnalysisPrompt, type HistoryItem, type ReplyPayload } from './_lib/prompts.js';
+import { callDeepSeek, callDeepSeekStream, isLlmConfigured } from './_lib/llm.js';
+import { createSseWriter } from './_lib/sse.js';
+import { checkRateLimit } from './_lib/ratelimit.js';
+import { extractJsonStringField, safeJsonParse } from './_lib/jsonStream.js';
+import { buildRuleReport, type LlmSemanticScores, type ReportInput } from '../engine/reportEngine.js';
 import type { Evidence, GameEvent, Message } from '../types';
 
 /**
@@ -63,10 +63,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
     if (action === 'topic') {
       const company = String(payload.company ?? '');
       const jobTitle = String(payload.jobTitle ?? '');
+      const industry = String(payload.industry ?? '');
+      const topicType = String(payload.topicType ?? '');
       if (!company || !jobTitle) {
         return response.status(400).json({ error: 'company 与 jobTitle 必填' });
       }
-      const prompt = buildTopicPrompt(company, jobTitle);
+      const prompt = buildTopicPrompt(company, jobTitle, industry, topicType);
 
       if (stream) {
         const sse = createSseWriter(response);

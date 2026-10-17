@@ -72,7 +72,10 @@ export interface AvatarPreset {
 }
 
 /** 群面阶段（PRD 4.1.3 真实计时四阶段） */
-export type PhaseId = 'READING' | 'OPENING' | 'FREE_DISCUSSION' | 'SUMMARY';
+export type PhaseId =
+  | 'READING' | 'OPENING' | 'FREE_DISCUSSION' | 'SUMMARY'
+  | 'SELF_INTRODUCTION' | 'INDIVIDUAL_THINKING' | 'GROUP_DISCUSSION'
+  | 'PRESENTATION' | 'INTERVIEWER_QA' | 'REVERSE_QUESTION' | 'REVIEW';
 
 export interface PhaseDef {
   id: PhaseId;
@@ -87,7 +90,10 @@ export interface PhaseDef {
 }
 
 /** 发言权调度事件（events 表，PRD 4.1.4 / D.3） */
-export type GameEventType = 'stage_change' | 'interrupt' | 'yield' | 'speak_grant';
+export type GameEventType =
+  | 'stage_change' | 'interrupt' | 'yield' | 'speak_grant'
+  | 'stage_start' | 'stage_end' | 'speaker_start' | 'speaker_end'
+  | 'interviewer_prompt' | 'user_called' | 'report_start' | 'report_ready';
 
 export interface GameEvent {
   event_type: GameEventType;
@@ -111,6 +117,15 @@ export interface Message {
   stepfunSegmentId?: string | null;
   /** 情绪（LLM emotion 字段，驱动 TTS instruction 与形象表情） */
   emotion?: string;
+  phaseId?: PhaseId;
+  participantType?: 'user' | 'candidate' | 'interviewer';
+  turnIndex?: number;
+  isInterruption?: boolean;
+  isQuestion?: boolean;
+  isAnswer?: boolean;
+  isSummary?: boolean;
+  replyToMessageId?: string;
+  audioStatus?: 'pending' | 'transcribed' | 'played' | 'failed' | 'text_only';
 }
 
 export interface FeedbackData {
@@ -147,6 +162,9 @@ export interface DimensionScore {
 export interface ReportV15 {
   session_id: number | null;
   overall_score: number;
+  performance_rank?: string;
+  simulated_rank?: string;
+  performance_level?: '领先' | '良好' | '待提升';
   dimensions: {
     content: DimensionScore;
     voice: DimensionScore;
@@ -165,7 +183,7 @@ export interface SimulationState {
   jobTitle: string;
   company: string;
   messages: Message[];
-  status: 'IDLE' | 'PREPARING' | 'DISCUSSING' | 'FINISHED';
+  status: 'IDLE' | 'BRIEFING' | 'PREPARING' | 'DISCUSSING' | 'INTERRUPTED' | 'FINISHED';
   activeCharacterId: string | null;
   round: number;
 }

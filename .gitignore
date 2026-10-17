@@ -79,3 +79,4 @@ temp/
 Thumbs.db
 desktop.ini
 ehthumbs.db
+.env*.local

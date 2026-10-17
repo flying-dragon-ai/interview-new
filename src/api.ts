@@ -47,6 +47,14 @@ async function parseJson<T>(res: Response): Promise<T | null> {
   }
 }
 
+export async function generateInterviewTopic(params: { industry: string; company: string; jobTitle: string; topicType: string }): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/llm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'topic', payload: params }) });
+    const data = await parseJson<{ content?: string }>(res);
+    return res.ok ? data?.content?.trim() || null : null;
+  } catch { return null; }
+}
+
 // 创建会话（roles 为角色卡 id 列表）
 export async function createSession(params: {
   company: string;
@@ -97,6 +105,15 @@ export async function updateSessionStatus(sessionId: number, status: string): Pr
   }
 }
 
+export async function syncQuestionFavorite(questionId: string, favorited: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/questions/${encodeURIComponent(questionId)}/favorite`, { method: favorited ? 'POST' : 'DELETE' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // 删除会话及全部记录（隐私：TC-11 不可恢复）
 export async function deleteSession(sessionId: number): Promise<boolean> {
   try {
@@ -123,6 +140,15 @@ export async function saveMessage(params: {
   endMs?: number;
   confidence?: number;
   stepfunSegmentId?: string | null;
+  phaseId?: string;
+  participantType?: 'user' | 'candidate' | 'interviewer';
+  turnIndex?: number;
+  isInterruption?: boolean;
+  isQuestion?: boolean;
+  isAnswer?: boolean;
+  isSummary?: boolean;
+  replyToMessageId?: string | null;
+  audioStatus?: string | null;
 }): Promise<MessageRecord | null> {
   try {
     const res = await fetch(`${API_BASE}/message`, {
@@ -140,6 +166,15 @@ export async function saveMessage(params: {
         end_ms: params.endMs,
         confidence: params.confidence,
         stepfun_segment_id: params.stepfunSegmentId ?? null,
+        phase_id: params.phaseId ?? null,
+        participant_type: params.participantType ?? (params.speakerType === 'user' ? 'user' : 'candidate'),
+        turn_index: params.turnIndex ?? params.round,
+        is_interruption: params.isInterruption ?? false,
+        is_question: params.isQuestion ?? false,
+        is_answer: params.isAnswer ?? false,
+        is_summary: params.isSummary ?? false,
+        reply_to_message_id: params.replyToMessageId ?? null,
+        audio_status: params.audioStatus ?? null,
       }),
     });
     if (!res.ok) return null;
@@ -157,6 +192,22 @@ export async function getMessages(sessionId: number): Promise<MessageRecord[]> {
   } catch {
     return [];
   }
+}
+
+export async function getPracticeHistory(): Promise<Session[]> {
+  try {
+    const res = await fetch(`${API_BASE}/practice-history`);
+    if (!res.ok) return [];
+    return (await parseJson<Session[]>(res)) ?? [];
+  } catch { return []; }
+}
+
+export async function getPracticeReview(practiceId: number): Promise<{ session: Session | null; messages: MessageRecord[]; events: import('../types').GameEvent[]; report: unknown }> {
+  try {
+    const res = await fetch(`${API_BASE}/practice/${practiceId}/review`);
+    if (!res.ok) return { session: null, messages: [], events: [], report: null };
+    return (await parseJson<{ session: Session | null; messages: MessageRecord[]; events: import('../types').GameEvent[]; report: unknown }>(res)) ?? { session: null, messages: [], events: [], report: null };
+  } catch { return { session: null, messages: [], events: [], report: null }; }
 }
 
 // 事件日志批量入库（PRD 4.1.4）
@@ -190,6 +241,9 @@ export async function saveReport(params: {
       body: JSON.stringify({
         session_id: params.sessionId,
         overall_score: params.report.overall_score,
+        performance_rank: params.report.performance_rank,
+        simulated_rank: params.report.simulated_rank,
+        performance_level: params.report.performance_level,
         dimension_scores: params.report.dimensions,
         evidence_pool: [
           ...params.report.dimensions.content.evidence,
@@ -201,6 +255,43 @@ export async function saveReport(params: {
         voice_share: params.legacy?.voiceShare ?? null,
         structural_contribution: params.legacy?.structuralContribution ?? null,
         interruption_handling: params.legacy?.interruptionHandling ?? null,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 保存已确认的链上交易索引；任何原始对话或完整报告字段都不会发送。 */
+export async function recordOnchainAssessment(params: {
+  sessionId: number | null;
+  walletAddress: string;
+  sessionHash: `0x${string}`;
+  scoreHash: `0x${string}`;
+  overallScore: number;
+  skillHashes: `0x${string}`[];
+  chainId: number;
+  contractAddress: `0x${string}`;
+  txHash: `0x${string}`;
+  tokenId: string | null;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'record_onchain_assessment',
+        session_id: params.sessionId,
+        wallet_address: params.walletAddress,
+        session_hash: params.sessionHash,
+        score_hash: params.scoreHash,
+        overall_score: params.overallScore,
+        skill_hashes: params.skillHashes,
+        chain_id: params.chainId,
+        contract_address: params.contractAddress,
+        tx_hash: params.txHash,
+        token_id: params.tokenId,
       }),
     });
     return res.ok;

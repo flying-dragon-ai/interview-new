@@ -1,7 +1,7 @@
 import type { RoleCard } from '../../types';
-import { cardDisplayRole } from '../../data/roleCards.ts';
-import { USER_INFO } from '../../data/userInfo.ts';
-import { extractKeyPoints } from '../../engine/keyPoints.ts';
+import { cardDisplayRole } from '../../data/roleCards.js';
+import { USER_INFO } from '../../data/userInfo.js';
+import { extractKeyPoints } from '../../engine/keyPoints.js';
 
 /**
  * 服务端 Prompt 资产（PRD 附录 F.0）
@@ -366,6 +366,10 @@ ${specificResponseHint}
 - 必须基本符合你的性格特点：${personaDescription(card)}
 `;
 
+  const participantRuleHint = card.id === 'tech_interviewer'
+    ? `\n【面试官角色规则】你是本场 AI 面试官，不是候选人：\n- 在“面试官提问”阶段，只提出一个具体、简短、可回答的问题，优先追问团队方案的依据、取舍或用户的实际贡献。\n- 不要代替候选人回答，不要输出候选人式观点，不要评价分数。\n- 在“反问环节”只对用户的问题作简短回应，并保持面试官身份。\n- 语气专业、克制、清晰，每次控制在 60 字以内。`
+    : '';
+
   const hasUserInHistory = recentHistory.some((m) => m.senderId === 'user');
   const userMessages = recentHistory.filter((m) => m.senderId === 'user');
 
@@ -585,6 +589,7 @@ ${summaryControlHint}
     ${userInteractionHint}
     ${guidanceHint}
     ${styleHint}
+    ${participantRuleHint}
     ${phaseRemainingHint}
     ${voiceOutputHint}
 
@@ -606,8 +611,8 @@ ${summaryControlHint}
 }
 
 /** 题目生成 prompt（原 generateTopic / generateTopicStream） */
-export function buildTopicPrompt(company: string, jobTitle: string): string {
-  return `你是一位资深的${company}面试官，正在为${jobTitle}岗位设计群面题目。
+export function buildTopicPrompt(company: string, jobTitle: string, industry = '', topicType = ''): string {
+  return `你是一位资深的${company}面试官，正在为${industry ? `${industry}行业的` : ''}${jobTitle}岗位设计${topicType ? `一套${topicType}` : ''}群面题目。
 
 请深入分析${company}的业务特点、行业定位、核心产品/服务，以及${jobTitle}岗位在该公司的实际工作场景和核心职责。基于这些信息，设计一个高度贴合、具有实战性的群面题目。
 

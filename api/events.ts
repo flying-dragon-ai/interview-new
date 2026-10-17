@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { GameEvent } from '../types';
-import { getPool, isDatabaseConfigured } from './_lib/db.ts';
+import { getPool, isDatabaseConfigured } from './_lib/db.js';
 
 /**
  * events 表读写（PRD 4.1.4：发言权调度事件日志入库，供面后分析）
@@ -8,7 +8,7 @@ import { getPool, isDatabaseConfigured } from './_lib/db.ts';
  * GET  /api/events?session_id=                           查询
  */
 
-const VALID_TYPES = new Set(['stage_change', 'interrupt', 'yield', 'speak_grant']);
+const VALID_TYPES = new Set(['stage_change', 'stage_start', 'stage_end', 'speaker_start', 'speaker_end', 'interrupt', 'yield', 'speak_grant', 'interviewer_prompt', 'user_called', 'report_start', 'report_ready']);
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (!isDatabaseConfigured()) {

@@ -1,6 +1,18 @@
 {
-  "buildCommand": "pnpm run build",
-  "outputDirectory": "dist",
-  "installCommand": "pnpm install",
-  "framework": "vite"
+  "builds": [
+    {
+      "src": "api/router.ts",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["api/**/*.ts", "data/**/*.ts", "engine/**/*.ts", "types.ts"],
+        "excludeFiles": [".env", ".env.*", "**/.env", "**/.env.*"]
+      }
+    },
+    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/router.ts?path=$1" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 }

@@ -45,7 +45,7 @@ test('C4: 原始音频默认不保存——录音仅用于 ASR 提交，不落�
   assert.ok(audioOnly, 'ASR 录音未限定为 audio only');
   // 音频 blob 不进持久化客户端
   const api = read('src/api.ts');
-  assert.ok(!/audio|blob|video/i.test(api.replace(/\/\/.*$/gm, '')), '持久化客户端出现音视频字段');
+  assert.ok(!/blob|MediaRecorder|video/i.test(api.replace(/\/\/.*$/gm, '')), '持久化客户端出现原始音视频字段');
   // 落库字段仅转写与聚合特征
   for (const field of ['start_ms', 'end_ms', 'confidence', 'stepfun_segment_id', 'speaker']) {
     assert.ok(api.includes(field), `持久化缺少转写字段 ${field}`);

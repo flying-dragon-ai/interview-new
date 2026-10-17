@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getPool, isDatabaseConfigured } from '../../_lib/db.ts';
-import { analyzeSession } from '../../_lib/analyze.ts';
+import { getPool, isDatabaseConfigured } from '../../_lib/db.js';
+import { analyzeSession } from '../../_lib/analyze.js';
 
 /**
  * POST /api/sessions/{id}/analyze —— 触发面后分析（PRD E.2 / 7.6）

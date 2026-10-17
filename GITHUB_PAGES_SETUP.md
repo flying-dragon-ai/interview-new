@@ -43,7 +43,7 @@
 
 2. **添加 DEEPSEEK_API_KEY**
    - Name: `DEEPSEEK_API_KEY`（必须完全匹配，区分大小写）
-   - Secret: `sk-84606ff70f2d44f992e1d3cce2851818`
+   - Secret: `<REDACTED_REVOKE_AND_REPLACE>`
    - 点击 **Add secret**
 
 ### 步骤 4：重新运行 Workflow

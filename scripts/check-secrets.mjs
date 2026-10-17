@@ -12,7 +12,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-ssr', 'tododocs
 const SCAN_EXTS = new Set(['.ts', '.tsx', '.js', '.mjs', '.json', '.html', '.sql', '.sh', '.md']);
 
 const PATTERNS = [
-  { name: 'DeepSeek/OpenAI 风格 key', re: /sk-[A-Za-z0-9]{20,}/, allow: ['.md'] },
+  { name: 'DeepSeek/OpenAI 风格 key', re: /sk-[A-Za-z0-9]{20,}/, allow: [] },
   { name: '阿里云 RDS 主机', re: new RegExp('[a-z0-9-]+' + '\\.pg\\.rds\\.aliyuncs\\.com'), allow: ['.md'] },
   { name: '已泄露账号', re: new RegExp('dong' + 'luyao'), allow: ['.md'] },
   { name: '已泄露密码', re: new RegExp('dong' + 'luyao' + '123456'), allow: ['.md'] },
@@ -45,7 +45,8 @@ for (const file of files) {
     const match = content.match(re);
     if (match) {
       findings += 1;
-      console.error(`❌ [D1/D2] ${rel} 命中 ${name}: ${match[0].slice(0, 50)}`);
+      const line = content.slice(0, match.index).split('\n').length;
+      console.error(`❌ [D1/D2] ${rel}:${line} 命中 ${name}（内容已隐藏）`);
     }
   }
 }

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { issueToken, isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.ts';
+import { issueToken, isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.js';
 
 /**
  * POST /api/tts-token —— 签发 StepFun TTS 连接凭证（PRD E.2 / G.4）

@@ -254,11 +254,46 @@ test('D.2: POST /api/feedback 写入 reports（dimension_scores/evidence_pool/su
   assert.equal(res.statusCode, 200);
   const ins = recorded.find((r) => /INSERT INTO reports/.test(r.sql));
   assert.ok(ins);
-  assert.ok(/\$5::jsonb/.test(ins!.sql), 'suggestions 未按 JSONB 写入');
-  // params[2] = dimension_scores JSON，params[3] = evidence_pool JSON，params[4] = suggestions JSON
-  assert.deepEqual(JSON.parse(ins!.params[2] as string).content.score, 28);
-  assert.deepEqual(JSON.parse(ins!.params[3] as string)[0].id, 'ev_001');
-  assert.deepEqual(JSON.parse(ins!.params[4] as string), ['下次练习在前 3 分钟发言']);
+  assert.ok(/::jsonb/.test(ins!.sql), 'JSON 字段未按 JSONB 写入');
+  // params[5] = dimension_scores JSON，params[6] = evidence_pool JSON，params[7] = suggestions JSON
+  assert.deepEqual(JSON.parse(ins!.params[5] as string).content.score, 28);
+  assert.deepEqual(JSON.parse(ins!.params[6] as string)[0].id, 'ev_001');
+  assert.deepEqual(JSON.parse(ins!.params[7] as string), ['下次练习在前 3 分钟发言']);
+});
+
+test('Monad MVP: confirmed credential transaction stores only public hash/index metadata', async () => {
+  const { pool, recorded } = mockPool(() => ({ rows: [{ id: 22, status: 'CONFIRMED' }] }));
+  setPoolForTesting(pool);
+  const res = mockRes();
+  await feedbackHandler(mockReq({
+    action: 'record_onchain_assessment',
+    session_id: 8,
+    wallet_address: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    session_hash: `0x${'1'.repeat(64)}`,
+    score_hash: `0x${'2'.repeat(64)}`,
+    overall_score: 82,
+    skill_hashes: [`0x${'3'.repeat(64)}`],
+    chain_id: 10143,
+    contract_address: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    tx_hash: `0x${'4'.repeat(64)}`,
+    token_id: '7',
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { persisted: true, record: { id: 22, status: 'CONFIRMED' } });
+  assert.match(recorded[0].sql, /INSERT INTO onchain_assessments/);
+  assert.match(recorded[0].sql, /ON CONFLICT \(chain_id, contract_address, tx_hash\)/);
+  assert.match(recorded[0].sql, /LOWER\(\$2\)/, '数据库未将钱包地址统一为小写');
+  assert.equal(JSON.stringify(recorded[0].params).includes('transcript'), false);
+});
+
+test('Monad MVP: invalid onchain assessment metadata is rejected before database write', async () => {
+  const { pool, recorded } = mockPool();
+  setPoolForTesting(pool);
+  const res = mockRes();
+  await feedbackHandler(mockReq({ action: 'record_onchain_assessment', wallet_address: 'not-an-address' }), res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(recorded.length, 0);
 });
 
 // ---------- 4.1.8 / E.2：形象端点 ----------

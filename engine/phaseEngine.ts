@@ -38,6 +38,18 @@ export const PHASE_DEFS: PhaseDef[] = [
   },
 ];
 
+/** MockSharp 风格八阶段流程，实际新版群面房间使用此配置。 */
+export const MOCKSHARP_PHASE_DEFS: PhaseDef[] = [
+  { id: 'SELF_INTRODUCTION', label: '自我介绍', promptPhase: '自我介绍阶段', durationMs: 4 * 60 * 1000, allowSpeech: true },
+  { id: 'READING', label: '读题', promptPhase: '读题阶段（阅读题目，暂不发言）', durationMs: 2 * 60 * 1000, allowSpeech: false },
+  { id: 'INDIVIDUAL_THINKING', label: '独立思考', promptPhase: '独立思考阶段', durationMs: 3 * 60 * 1000, allowSpeech: false },
+  { id: 'GROUP_DISCUSSION', label: '小组讨论', promptPhase: '小组讨论阶段', durationMs: 15 * 60 * 1000, allowSpeech: true },
+  { id: 'PRESENTATION', label: '汇报', promptPhase: '小组汇报阶段', durationMs: 3 * 60 * 1000, allowSpeech: true },
+  { id: 'INTERVIEWER_QA', label: '面试官提问', promptPhase: '面试官提问阶段', durationMs: 5 * 60 * 1000, allowSpeech: true },
+  { id: 'REVERSE_QUESTION', label: '反问环节', promptPhase: '候选人反问面试官阶段', durationMs: 2 * 60 * 1000, allowSpeech: true },
+  { id: 'REVIEW', label: '复盘', promptPhase: '复盘阶段', durationMs: 1 * 60 * 1000, allowSpeech: false },
+];
+
 /** 个人陈述每人的时长（PRD：每人 1min） */
 export const OPENING_TURN_MS = 60 * 1000;
 
@@ -46,6 +58,9 @@ export interface PhaseConfig {
   durationsMs?: Partial<Record<PhaseId, number>>;
   /** 个人陈述发言顺序（speaker id 列表，'user' 表示用户） */
   openingOrder?: string[];
+  phaseSet?: 'legacy' | 'mocksharp';
+  /** 每位候选人个人陈述时长覆盖（演示模式使用） */
+  openingTurnMs?: number;
 }
 
 export interface PhaseState {
@@ -65,8 +80,9 @@ export interface TickResult {
 }
 
 export function getPhaseDefs(config?: PhaseConfig): PhaseDef[] {
-  if (!config?.durationsMs) return PHASE_DEFS;
-  return PHASE_DEFS.map((p) => ({
+  const base = config?.phaseSet === 'mocksharp' ? MOCKSHARP_PHASE_DEFS : PHASE_DEFS;
+  if (!config?.durationsMs) return base;
+  return base.map((p) => ({
     ...p,
     durationMs: config.durationsMs?.[p.id] ?? p.durationMs,
   }));
@@ -83,7 +99,8 @@ export function initPhaseEngine(now: number, config?: PhaseConfig): PhaseState {
 }
 
 export function currentPhase(state: PhaseState, config?: PhaseConfig): PhaseDef {
-  return getPhaseDefs(config)[Math.min(state.phaseIndex, PHASE_DEFS.length - 1)];
+  const defs = getPhaseDefs(config);
+  return defs[Math.min(state.phaseIndex, defs.length - 1)];
 }
 
 export function phaseRemainingMs(state: PhaseState, now: number, config?: PhaseConfig): number {
@@ -91,13 +108,14 @@ export function phaseRemainingMs(state: PhaseState, now: number, config?: PhaseC
   return Math.max(0, def.durationMs - (now - state.phaseStartedAt));
 }
 
-/** 个人陈述当前发言者（仅 OPENING 阶段有效） */
+/** 个人陈述当前发言者（旧 OPENING 与 MockSharp 自我介绍阶段有效） */
 export function currentOpeningSpeaker(
   state: PhaseState,
   config?: PhaseConfig
 ): string | null {
   const order = config?.openingOrder ?? [];
-  if (currentPhase(state, config).id !== 'OPENING') return null;
+  const phaseId = currentPhase(state, config).id;
+  if (phaseId !== 'OPENING' && phaseId !== 'SELF_INTRODUCTION') return null;
   if (state.openingIndex >= order.length) return null;
   return order[state.openingIndex];
 }
@@ -109,7 +127,7 @@ export function stageUrgency(state: PhaseState, now: number, config?: PhaseConfi
   const elapsed = now - state.phaseStartedAt;
   const ratio = Math.min(1, elapsed / def.durationMs);
   // 自由讨论最后 3 分钟与总结阶段线性拉升
-  if (def.id === 'FREE_DISCUSSION') {
+  if (def.id === 'FREE_DISCUSSION' || def.id === 'GROUP_DISCUSSION') {
     const lastThreeMin = 3 * 60 * 1000;
     const remain = def.durationMs - elapsed;
     return remain <= lastThreeMin ? (lastThreeMin - remain) / lastThreeMin : 0;
@@ -140,10 +158,10 @@ export function tickPhase(
   const phaseElapsed = now - state.phaseStartedAt;
   const openingOrder = config?.openingOrder ?? [];
 
-  if (def.id === 'OPENING') {
+  if (def.id === 'OPENING' || def.id === 'SELF_INTRODUCTION') {
     // 个人陈述：每人 1min，轮流推进
     const turnElapsed = now - state.openingStartedAt;
-    if (turnElapsed >= OPENING_TURN_MS || state.openingIndex >= openingOrder.length) {
+    if (turnElapsed >= (config?.openingTurnMs ?? OPENING_TURN_MS) || state.openingIndex >= openingOrder.length) {
       if (state.openingIndex + 1 < openingOrder.length) {
         next = {
           ...next,
@@ -168,6 +186,8 @@ export function tickPhase(
         phaseStartedAt: now,
       };
       events.push(makeEvent('stage_change', 'system', defs[next.phaseIndex].id, now - sessionStartAt, { reason: 'opening_done' }));
+      events.push(makeEvent('stage_end', 'system', def.id, now - sessionStartAt, { reason: 'opening_done' }));
+      events.push(makeEvent('stage_start', 'system', defs[next.phaseIndex].id, now - sessionStartAt, { reason: 'opening_done' }));
       return { state: next, events, changed: true };
     }
     return { state, events: [], changed: false };
@@ -182,7 +202,7 @@ export function tickPhase(
       return { state: next, events, changed: true };
     }
     next = { ...next, phaseIndex: nextIndex, phaseStartedAt: now };
-    if (defs[nextIndex].id === 'OPENING') {
+    if (defs[nextIndex].id === 'OPENING' || defs[nextIndex].id === 'SELF_INTRODUCTION') {
       next = { ...next, openingIndex: 0, openingStartedAt: now };
     }
     events.push(
@@ -191,6 +211,8 @@ export function tickPhase(
         from: def.id,
       })
     );
+    events.push(makeEvent('stage_end', 'system', def.id, now - sessionStartAt, { reason: 'countdown' }));
+    events.push(makeEvent('stage_start', 'system', defs[nextIndex].id, now - sessionStartAt, { reason: 'countdown' }));
     return { state: next, events, changed: true };
   }
 
@@ -211,7 +233,7 @@ export function advancePhaseByKeyword(
   const defs = getPhaseDefs(config);
   const def = defs[Math.min(state.phaseIndex, defs.length - 1)];
   // 仅允许：自由讨论 → 总结（关键词检测到总结引导时提前收尾）
-  if (def.id !== 'FREE_DISCUSSION') return { state, events: [], changed: false };
+  if (def.id !== 'FREE_DISCUSSION' && def.id !== 'GROUP_DISCUSSION') return { state, events: [], changed: false };
   const nextIndex = state.phaseIndex + 1;
   if (nextIndex >= defs.length) return { state, events: [], changed: false };
   const next = { ...state, phaseIndex: nextIndex, phaseStartedAt: now };

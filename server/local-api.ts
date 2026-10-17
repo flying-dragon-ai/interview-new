@@ -20,6 +20,10 @@ const STATIC_ROUTES: Record<string, string> = {
   '/api/asr': '/api/asr.ts',
   '/api/tts-token': '/api/tts-token.ts',
   '/api/asr-token': '/api/asr-token.ts',
+  '/api/practice-history': '/api/practice-history.ts',
+  '/api/questions': '/api/questions.ts',
+  '/api/questions/random': '/api/questions/random.ts',
+  '/api/questions/stats': '/api/questions/stats.ts',
 };
 
 /** Vercel 文件系统路由：[id] 动态段 → query.id */
@@ -27,6 +31,10 @@ const DYNAMIC_ROUTES: { re: RegExp; file: string }[] = [
   { re: /^\/api\/sessions\/(\d+)\/analyze$/, file: '/api/sessions/[id]/analyze.ts' },
   { re: /^\/api\/sessions\/(\d+)\/report$/, file: '/api/sessions/[id]/report.ts' },
   { re: /^\/api\/sessions\/(\d+)$/, file: '/api/sessions/[id]/index.ts' },
+  { re: /^\/api\/practice\/([^/]+)\/review$/, file: '/api/practice/[id]/review.ts' },
+  { re: /^\/api\/questions\/([^/]+)\/favorite$/, file: '/api/questions/[id]/favorite.ts' },
+  { re: /^\/api\/questions\/([^/]+)\/retry$/, file: '/api/questions/[id]/retry.ts' },
+  { re: /^\/api\/questions\/([^/]+)$/, file: '/api/questions/[id].ts' },
 ];
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
