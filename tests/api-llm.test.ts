@@ -204,3 +204,34 @@ test('/api/llm 未配置 key → 500 LLM_NOT_CONFIGURED', async () => {
   assert.equal(res.statusCode, 500);
   assert.match(res.body, /LLM_NOT_CONFIGURED/);
 });
+
+test('按 action 模型路由：DEEPSEEK_MODEL_REPLY 覆盖 reply，topic 用 DEEPSEEK_MODEL', async () => {
+  const prevModel = process.env.DEEPSEEK_MODEL;
+  const prevReply = process.env.DEEPSEEK_MODEL_REPLY;
+  process.env.DEEPSEEK_MODEL = 'step-5-preview';
+  process.env.DEEPSEEK_MODEL_REPLY = 'step-3.7-flash';
+
+  const seen: string[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const body = JSON.parse(String(init.body));
+    seen.push(body.model);
+    return llmSse(['{"content":"好的","emotion":"neutral"}']);
+  }) as any;
+
+  try {
+    let res = mockRes();
+    await handler(mockReq({ action: 'reply', payload: { card: { id: 'strategy_consultant' }, topic: 't', jobTitle: 'j', history: [] } }), res);
+    assert.equal(res.statusCode, 200);
+
+    res = mockRes();
+    await handler(mockReq({ action: 'topic', payload: { company: '字节', jobTitle: '产品' } }), res);
+    assert.equal(res.statusCode, 200);
+
+    assert.deepEqual(seen, ['step-3.7-flash', 'step-5-preview'], `模型路由错误: ${JSON.stringify(seen)}`);
+  } finally {
+    if (prevModel === undefined) delete process.env.DEEPSEEK_MODEL;
+    else process.env.DEEPSEEK_MODEL = prevModel;
+    if (prevReply === undefined) delete process.env.DEEPSEEK_MODEL_REPLY;
+    else process.env.DEEPSEEK_MODEL_REPLY = prevReply;
+  }
+});

@@ -12,7 +12,8 @@
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "verify": "npm run check:secrets && npm run typecheck && npm run test && npm run build && npm run check:bundle",
-    "test:e2e": "node scripts/e2e-api.mjs"
+    "test:e2e": "node scripts/e2e-api.mjs",
+    "test:e2e:onchain": "bash scripts/e2e-onchain.sh"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^1.2.0",

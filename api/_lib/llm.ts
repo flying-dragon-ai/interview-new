@@ -43,6 +43,19 @@ function getModelId(): string {
   return (process.env.DEEPSEEK_MODEL && process.env.DEEPSEEK_MODEL.trim()) || DEFAULT_MODEL;
 }
 
+/**
+ * 按 action 的模型覆盖：DEEPSEEK_MODEL_<ACTION>（如 DEEPSEEK_MODEL_REPLY）
+ * 优先于 DEEPSEEK_MODEL。用途：交互循环（reply）延迟敏感可用轻模型，
+ * 一次性调用（topic/feedback/analyze）质量敏感用强模型。
+ */
+export function getModelIdFor(action?: string): string {
+  if (action) {
+    const override = process.env[`DEEPSEEK_MODEL_${action.toUpperCase()}`];
+    if (override && override.trim()) return override.trim();
+  }
+  return getModelId();
+}
+
 /** 温度覆盖：部分模型（如 Kimi k2/k3）仅允许 temperature=1，用 DEEPSEEK_TEMPERATURE 强制统一值 */
 function getTemperature(requested: number): number {
   const override = process.env.DEEPSEEK_TEMPERATURE;
@@ -79,13 +92,12 @@ interface LlmRuntime {
   model: Model<'openai-completions'>;
 }
 
-let cached: { baseUrl: string; modelId: string; runtime: LlmRuntime } | null = null;
-
+const runtimeCache = new Map<string, LlmRuntime>();
 /** 构建（并缓存）pi-ai Models 集合：单 provider + 单模型，配置完全来自 env */
-function getRuntime(): LlmRuntime {
+function getRuntime(modelIdArg: string): LlmRuntime {
   const baseUrl = getBaseUrl();
-  const modelId = getModelId();
-  if (!cached || cached.baseUrl !== baseUrl || cached.modelId !== modelId) {
+  const modelId = modelIdArg;
+  if (!runtimeCache.has(`${baseUrl}|${modelId}`)) {
     const reasoningLevel = getReasoningLevel();
     const modelDef: Model<'openai-completions'> = {
       id: modelId,
@@ -115,9 +127,9 @@ function getRuntime(): LlmRuntime {
     if (!model) {
       throw new Error(`pi-ai 模型注册失败: ${PROVIDER_ID}/${modelId}`);
     }
-    cached = { baseUrl, modelId, runtime: { models, model } };
+    runtimeCache.set(`${baseUrl}|${modelId}`, { models, model });
   }
-  return cached.runtime;
+  return runtimeCache.get(`${baseUrl}|${modelId}`)!;
 }
 
 function userContext(prompt: string): Context {
@@ -130,9 +142,9 @@ function toError(err: unknown): Error {
 }
 
 /** 非流式调用 */
-export async function callDeepSeek(prompt: string, temperature = 0.7): Promise<string> {
+export async function callDeepSeek(prompt: string, temperature = 0.7, action?: string): Promise<string> {
   getApiKey(); // 未配置时快速报错
-  const { models, model } = getRuntime();
+  const { models, model } = getRuntime(getModelIdFor(action));
   let msg;
   try {
     msg = await models.completeSimple(model, userContext(prompt), {
@@ -165,10 +177,11 @@ export async function callDeepSeekStream(
   prompt: string,
   temperature: number,
   onDelta: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  action?: string
 ): Promise<string> {
   getApiKey();
-  const { models, model } = getRuntime();
+  const { models, model } = getRuntime(getModelIdFor(action));
   let full = '';
   try {
     const stream = models.streamSimple(model, userContext(prompt), {

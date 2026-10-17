@@ -340,7 +340,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
         <div className="glass-panel p-4">
           <div className="text-sm font-semibold text-white/85 mb-2">⏱️ 群面流程（倒计时驱动，到点强制切换）</div>
           <ol className="text-xs text-white/60 space-y-1.5 list-decimal pl-4">
-            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（2 分钟，暂不发言）</li>
+            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，暂不发言）</li>
             <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
             <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断/抢话）</li>
             <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）→ 面后报告</li>

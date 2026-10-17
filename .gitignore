@@ -93,3 +93,6 @@ indexer/node_modules/
 indexer/generated/
 indexer/.envio/
 indexer/.env
+
+# E2E 本地链验证临时产物
+.e2e-*

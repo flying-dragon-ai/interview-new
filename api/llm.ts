@@ -78,7 +78,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
             prompt,
             0.7,
             (chunk) => sse.send('delta', { delta: chunk }),
-            controller.signal
+            controller.signal,
+            'topic'
           );
           const cleaned = cleanTopicText(full);
           sse.send('done', { content: cleaned || '题目生成失败，请手动输入。' });
@@ -90,7 +91,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return;
       }
 
-      const full = await callDeepSeek(prompt, 0.7);
+      const full = await callDeepSeek(prompt, 0.7, 'topic');
       return response.status(200).json({ content: cleanTopicText(full) || '题目生成失败，请手动输入。' });
     }
 
@@ -142,7 +143,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
                 sentLen = acc.length;
               }
             },
-            controller.signal
+            controller.signal,
+            'reply'
           );
           const parsed = safeJsonParse<{ content?: string; emotion?: string; target?: string; stepfun_tts_instruction?: string }>(full);
           const content = (parsed?.content ?? full).trim() || '时间紧迫，我们必须尽快达成共识。';
@@ -164,7 +166,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return;
       }
 
-      const full = await callDeepSeek(prompt, 0.8);
+      const full = await callDeepSeek(prompt, 0.8, 'reply');
       const parsed = safeJsonParse<{ content?: string; emotion?: string; target?: string; stepfun_tts_instruction?: string }>(full);
       return response.status(200).json({
         content: (parsed?.content ?? full).trim() || '时间紧迫，我们必须尽快达成共识。',
@@ -183,10 +185,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const voiceShare = history.length > 0 ? Math.round((userCount / history.length) * 100) : 0;
 
       const prompt = `作为专业面试官，请深度分析以下讨论中【用户】的表现。
+注意：只评价【用户】本人，绝对不要评价任何 AI 参与者的表现。
 岗位：${jobTitle}
 题目：${topic}
-全场对话记录：
-${history.map((m) => `${m.senderName}: ${m.content}`).join('\n')}
+全场对话记录（【用户】= 被评估者；【AI】前缀 = 其他参与者，仅供参考上下文）：
+${history.map((m) => `${m.senderId === 'user' ? `【用户】${m.senderName}` : `【AI】${m.senderName}`}：${m.content}`).join('\n')}
 
 评估维度：
 1. **发言质量**：分析用户观点是否切中题目核心要害，是否提供了独特的洞察。
@@ -211,7 +214,7 @@ ${history.map((m) => `${m.senderName}: ${m.content}`).join('\n')}
 - suggestions 必须是字符串数组，包含 3-5 条具体改进建议
 - voiceShare 字段会被系统自动计算，你可以忽略它`;
 
-      const full = await callDeepSeek(prompt, 0.3);
+      const full = await callDeepSeek(prompt, 0.3, 'feedback');
       const parsed = safeJsonParse<{
         timing?: string;
         structuralContribution?: string;
@@ -256,7 +259,7 @@ ${history.map((m) => `${m.senderName}: ${m.content}`).join('\n')}
       let llm: LlmSemanticScores | undefined;
       if (userTranscripts.length > 0) {
         try {
-          const full = await callDeepSeek(buildAnalysisPrompt(topic, userTranscripts), 0.3);
+          const full = await callDeepSeek(buildAnalysisPrompt(topic, userTranscripts), 0.3, 'analyze');
           const parsed = safeJsonParse<LlmSemanticScores & { evidence?: { content: string; timestamp_ms: number }[] }>(full);
           if (parsed) {
             llm = {

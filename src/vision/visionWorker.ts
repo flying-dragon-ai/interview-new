@@ -19,6 +19,8 @@ import { SecondAggregator, blendshapeMap, judgeFrame } from '../../engine/vision
 
 const WASM_DIR = '/vision/wasm';
 const MODEL_PATH = '/vision/face_landmarker.task';
+/** ESM 版 wasm 胶水（与 FilesetResolver.forVisionTasks(dir, true) 选中的文件一致） */
+const WASM_GLUE_PATH = `${WASM_DIR}/vision_wasm_module_internal.js`;
 
 export type VisionWorkerIn =
   | { type: 'frame'; bitmap: ImageBitmap; timestampMs: number }
@@ -42,7 +44,26 @@ let initPromise: Promise<FaceLandmarker | null> | null = null;
 let initFailed = false;
 let lastFrameTs = 0;
 
-async function createLandmarker(delegate: 'GPU' | 'CPU'): Promise<FaceLandmarker> {
+/**
+ * 预加载 ESM 版 wasm 胶水，确保 self.ModuleFactory 就绪。
+ *
+ * 两个坑都在这里绕：
+ * 1. module worker 里 importScripts 不可用，胶水只能靠动态 import() 加载；
+ * 2. MediaPipe 每次调用 ModuleFactory() 后都会把 self.ModuleFactory 清空，而动态
+ *    import() 命中模块缓存不会重新执行模块体——GPU→CPU 回退重试前必须带查询串重新
+ *    import，让模块重新求值把全局还原，否则第二次会 "ModuleFactory not set"。
+ */
+async function ensureWasmGlue(attempt: number): Promise<void> {
+  const url = attempt > 1 ? `${WASM_GLUE_PATH}?retry=${attempt}` : WASM_GLUE_PATH;
+  await import(/* @vite-ignore */ url);
+}
+
+async function createLandmarker(delegate: 'GPU' | 'CPU', attempt: number): Promise<FaceLandmarker> {
+  // useModule=true 必须保留：本 worker 是 module worker，Chrome 里 importScripts 直接抛
+  // TypeError，MediaPipe 只能走动态 import() 加载 wasm 胶水，而 import() 只接受 ES module
+  // 版胶水（vision_wasm_module_internal.js）。默认的 classic 版在 module worker 里会因
+  // "ModuleFactory not set" 失败。
+  await ensureWasmGlue(attempt);
   const fileset = await FilesetResolver.forVisionTasks(WASM_DIR, true);
   return FaceLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: MODEL_PATH, delegate },
@@ -64,9 +85,9 @@ function ensureLandmarker(): Promise<FaceLandmarker | null> {
     initPromise = (async () => {
       try {
         try {
-          landmarker = await createLandmarker('GPU');
+          landmarker = await createLandmarker('GPU', 1);
         } catch {
-          landmarker = await createLandmarker('CPU');
+          landmarker = await createLandmarker('CPU', 2);
         }
         return landmarker;
       } catch (err) {

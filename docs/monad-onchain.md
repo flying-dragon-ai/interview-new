@@ -26,6 +26,7 @@ EvidenceReport（报告页）
 | 铸证 UI | `components/CertificateSection.tsx` | 懒加载；读价→查重→余额检查→估算 gas→铸造→交易链接；Envio 证书列表 |
 | 报告页接线 | `components/EvidenceReport.tsx` | 守卫：`isCertConfigured() && wallet.configured && !wallet.isLoading` |
 | 测试 | `tests/onchain-certificate.test.ts` | 哈希规范化 + ABI↔合约静态看守 + 接线断言 |
+| E2E 脚本 | `scripts/e2e-onchain.sh` + `scripts/e2e-report-hash.mjs` | anvil 本地链全链路 22 断言（`pnpm test:e2e:onchain`） |
 
 行为要点：
 
@@ -199,6 +200,26 @@ pnpm dev
    索引器抓到 `CertificateMinted` → 「我的链上证书」出现记录 →
    钱包里尝试转让该 NFT 失败（soulbound 生效）。
 4. 错链时按钮变「切换到 Monad Testnet」；余额不足时显示水龙头链接。
+
+### 5b. 本地全链路 E2E（anvil，无需先部署 testnet）
+
+```bash
+pnpm test:e2e:onchain
+```
+
+`scripts/e2e-onchain.sh` 22 项断言（当前全绿）：
+
+- **reportHash 用前端同款模块** `src/onchain/reportHash.ts` 计算 —— 与 `CertificateSection` 铸证时逐字节一致（键序规范化 + minter 入哈希）
+- `forge create` 部署（mintPrice 0.01 / treasury 任意地址）
+- 付费铸证：status=1、`certificateOfReport`=1、`nextTokenId`=2、`ownerOf`=minter、`verifyReport` 正/反例
+- **事件形状（索引器输入）**：过滤 ERC721 Transfer 后，`CertificateMinted` 的 topic0 = `keccak("CertificateMinted(uint256,address,bytes32,uint256)")`、4 topics（3 indexed）、tokenId/recipient/reportHash 与前端哈希一致、data=paidAmount
+- **soulbound**：transferFrom / safeTransferFrom 均 revert `SoulboundTransfer()`（selector `0x7a54ebfc`）
+- **查重**：同一 hash 二次铸造 revert `ReportAlreadyMinted(bytes32,uint256)`（`0xd5179d9d`）
+- **欠费** revert `InsufficientPayment(uint256,uint256)`（`0xb99e2ab7`）；超额接受
+- **withdraw**：第三方触发，treasury 增量 0.03 MON、合约余额清零
+- **gas 实测 123,190**（高于 forge 单测 113,337：全新冷存储路径）→ 前端 estimateGas+10% ≈ 135k，兜底 200k 覆盖
+
+注意：本地 E2E 证明「合约 + 哈希 + 事件 + 资金流」全通；**testnet 真部署 + Para 钱包 UI + Envio 索引**仍需上面 1-3 步（operator CLI 前置）。
 
 ## owner 运维（alchemy 会话）
 
