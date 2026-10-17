@@ -61,13 +61,13 @@ pnpm contracts:deploy:testnet
 
 | 项目 | 当前状态 |
 | --- | --- |
-| Web Demo | 本地可运行；公网 URL 待部署后补充 |
-| Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待部署 |
-| GitHub 仓库 | 当前工作目录尚未配置公开远端 |
+| Web Demo | [Vercel Preview](https://interview-second-7vz56kxn5-llingqi77-4019s-projects.vercel.app) 已部署；当前受 Vercel 登录保护，未开放匿名访问 |
+| Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待使用用户授权的钱包会话部署 |
+| GitHub 仓库 | [interview-new](https://github.com/llingqi77-tech/interview-new)；本次 MVP 在 `codex/monad-blitz-mvp` 分支 |
 | 合约验证 / 交易链接 | 部署后写入本节 |
 | 演示流程 | `docs/DEMO_SCRIPT.md` |
 
-README 中的部署地址、公开仓库和公网 Demo 必须以真实部署结果填充，当前不填入虚构数据。
+Preview 地址受 Vercel 项目保护；公开比赛演示仍需在确认访问策略后部署或开放。README 不填入虚构的合约地址或交易链接。
 
 详细实现、证明文件格式和链上隐私边界见 [`docs/monad-credential-mvp.md`](./docs/monad-credential-mvp.md)。
 
