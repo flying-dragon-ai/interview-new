@@ -16,6 +16,7 @@ export interface AssessmentProof {
   scoreSummary: {
     overallScore: number;
     skills: Record<string, number>;
+    assessedDimensions: string[];
     reportVersion: string;
   };
   sessionHash: `0x${string}`;
@@ -40,21 +41,27 @@ function randomHex(bytes = 32): string {
 export function createAssessmentProof(report: ReportV15): AssessmentProof {
   const sessionNonce = randomHex();
   const scoreSalt = randomHex();
-  const skills = {
+  const skills: Record<string, number> = {
     content: report.dimensions.content.score,
     analysis: Math.round((report.dimensions.content.score / report.dimensions.content.max) * 100),
-    voice: report.dimensions.voice.score,
     stress: report.dimensions.stress.score,
     teamwork: report.dimensions.teamwork.score,
   };
+  const assessedDimensions = ['content', 'analysis', 'stress', 'teamwork'];
+  if (report.dimensions.voice.status !== 'not_enabled') {
+    skills.voice = report.dimensions.voice.score;
+    assessedDimensions.splice(2, 0, 'voice');
+  }
   const scoreSummary = {
     overallScore: report.overall_score,
     skills,
+    assessedDimensions,
     reportVersion: '1.0',
   };
   const sessionHash = keccak256(toBytes(sessionNonce));
   const scoreHash = keccak256(toBytes(stableStringify({ scoreSummary, scoreSalt })));
-  const skillHashes = SKILL_TAGS.map(({ key, label }) => keccak256(toBytes(`${key}:${label}`)));
+  const skillHashes = SKILL_TAGS.filter(({ key }) => key !== 'voice' || report.dimensions.voice.status !== 'not_enabled')
+    .map(({ key, label }) => keccak256(toBytes(`${key}:${label}`)));
 
   return { schema: 'interview-credential-proof/v1', sessionNonce, scoreSalt, scoreSummary, sessionHash, scoreHash, skillHashes };
 }
@@ -63,6 +70,7 @@ export function verifyAssessmentProof(proof: AssessmentProof): boolean {
   if (proof.schema !== 'interview-credential-proof/v1') return false;
   if (keccak256(toBytes(proof.sessionNonce)) !== proof.sessionHash) return false;
   if (keccak256(toBytes(stableStringify({ scoreSummary: proof.scoreSummary, scoreSalt: proof.scoreSalt }))) !== proof.scoreHash) return false;
-  const expectedSkillHashes = SKILL_TAGS.map(({ key, label }) => keccak256(toBytes(`${key}:${label}`)));
+  const expectedSkillHashes = SKILL_TAGS.filter(({ key }) => key !== 'voice' || proof.scoreSummary.assessedDimensions.includes('voice'))
+    .map(({ key, label }) => keccak256(toBytes(`${key}:${label}`)));
   return stableStringify(expectedSkillHashes) === stableStringify(proof.skillHashes);
 }

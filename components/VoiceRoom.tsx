@@ -15,6 +15,7 @@ interface VoiceRoomProps {
   sessionId: number | null;
   consentSaveTranscript: boolean;
   cameraEnabled: boolean;
+  voiceEnabled: boolean;
   facingMode: 'user' | 'environment';
   voiceCaps?: VoiceCapabilities | null;
   onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number) => void;
@@ -29,6 +30,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
   sessionId,
   consentSaveTranscript,
   cameraEnabled,
+  voiceEnabled,
   facingMode,
   voiceCaps,
   onFinish,
@@ -37,7 +39,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
   demoMode = false,
 }) => {
   const caps = voiceCaps ?? detectCapabilities();
-  const inputLabel =
+  const inputLabel = !voiceEnabled ? '纯文字练习（未启用麦克风）' :
     caps.inputMode === 'stepfun-asr' ? 'StepFun ASR' : caps.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）';
   const outputLabel = caps.outputMode === 'stepfun-tts' ? 'StepFun TTS' : caps.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）';
 
@@ -68,6 +70,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
           sessionId={sessionId}
           consentSaveTranscript={consentSaveTranscript}
           cameraEnabled={cameraEnabled}
+          voiceEnabled={voiceEnabled}
           facingMode={facingMode}
           onFinish={onFinish}
           resumeCheckpoint={resumeCheckpoint}

@@ -80,6 +80,12 @@ test('US-01: 用户可不请求麦克风权限直接选择纯文字练习', () =
   assert.ok(/voiceEnabled: micStatus === 'passed'/.test(dc), '跳过麦克风后仍会启用语音');
 });
 
+test('US-01: 文字练习的语音能力状态传递给报告评分', () => {
+  const app = read('App.tsx');
+  assert.ok(/setVoiceEnabled\(result\.voiceEnabled\)/.test(app), '设备准备结果未保存语音能力状态');
+  assert.ok(/voiceEnabled/.test(app) && /buildRuleReport\([\s\S]{0,180}voiceEnabled/.test(app), '本地规则报告未接收语音能力状态');
+});
+
 test('US-13: SetupForm 12 角色卡选择 + 约束校验', () => {
   const form = read('components/SetupForm.tsx');
   assert.ok(/autoSelectRolesForTopic/.test(form), '缺少按题型自动分配');

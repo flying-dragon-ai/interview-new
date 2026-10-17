@@ -72,7 +72,13 @@ export async function analyzeSession(
     metadata: r.metadata ?? {},
   }));
 
-  const input: ReportInput = { transcripts, events, sessionStartAt, durationMs };
+  const input: ReportInput = {
+    transcripts,
+    events,
+    sessionStartAt,
+    durationMs,
+    voiceEnabled: typeof session?.voice_enabled === 'boolean' ? session.voice_enabled : true,
+  };
 
   const userTranscripts = transcripts
     .filter((m) => m.senderId === 'user')

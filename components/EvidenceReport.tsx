@@ -84,6 +84,7 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
   const eventTimeline = events
     .filter((e) => e.event_type === 'interrupt' || e.event_type === 'stage_change' || e.event_type === 'stage_start' || e.event_type === 'stage_end')
     .slice(0, 20);
+  const voiceNotEnabled = report.dimensions.voice.status === 'not_enabled';
 
   return (
     <div className="max-w-4xl mx-auto p-6 md:p-8 bg-[#f4f4f0] rounded-2xl border border-[#d8d8d2]">
@@ -111,10 +112,11 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">模拟排名</div>
           </div>
           <div className="flex flex-col items-center">
-            <div className="text-5xl font-black text-emerald-500">{report.dimensions.voice.metrics?.['话语权占比'] ?? 0}%</div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">话语权占有</div>
+            <div className="text-5xl font-black text-emerald-500">{voiceNotEnabled ? '—' : `${report.dimensions.voice.metrics?.['话语权占比'] ?? 0}%`}</div>
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{voiceNotEnabled ? '语音未评估' : '话语权占比'}</div>
           </div>
         </div>
+        {report.score_note && <p className="mt-4 text-xs text-slate-500">{report.score_note}</p>}
       </div>
 
       {/* 维度分 */}

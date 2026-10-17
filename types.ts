@@ -167,12 +167,14 @@ export interface ReportV15 {
   performance_level?: '领先' | '良好' | '待提升';
   dimensions: {
     content: DimensionScore;
-    voice: DimensionScore;
+    voice: DimensionScore & { status?: 'not_enabled' | 'enabled' };
     visual: DimensionScore & { status: 'not_enabled' | 'enabled' };
     stress: DimensionScore;
     teamwork: DimensionScore;
   };
   suggestions: string[];
+  /** 场次综合分的计算口径说明（例如未启用语音时按可评估维度归一化） */
+  score_note?: string;
   /** 旧 4 字段保留冗余展示（PRD D.2） */
   legacy?: FeedbackData;
   created_at?: string;

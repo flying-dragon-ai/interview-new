@@ -29,3 +29,15 @@ test('assessment proof verification detects a changed score', () => {
   proof.scoreSummary.overallScore = 99;
   assert.equal(verifyAssessmentProof(proof), false);
 });
+
+test('text-only proof omits voice score and voice skill claim', () => {
+  const textOnlyReport = {
+    ...report,
+    dimensions: { ...report.dimensions, voice: { ...report.dimensions.voice, score: 0, status: 'not_enabled' as const } },
+  };
+  const proof = createAssessmentProof(textOnlyReport);
+  assert.equal(verifyAssessmentProof(proof), true);
+  assert.equal('voice' in proof.scoreSummary.skills, false);
+  assert.equal(proof.scoreSummary.assessedDimensions.includes('voice'), false);
+  assert.equal(proof.skillHashes.length, 4);
+});

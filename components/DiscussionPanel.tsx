@@ -50,6 +50,7 @@ interface DiscussionPanelProps {
   sessionId: number | null;
   consentSaveTranscript: boolean;
   cameraEnabled: boolean;
+  voiceEnabled: boolean;
   facingMode: 'user' | 'environment';
   onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number) => void;
   resumeCheckpoint?: PhaseState | null;
@@ -64,6 +65,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   sessionId,
   consentSaveTranscript,
   cameraEnabled,
+  voiceEnabled,
   facingMode,
   onFinish,
   resumeCheckpoint,
@@ -702,7 +704,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       participantType: 'user',
       turnIndex: messagesRef.current.length + 1,
       isQuestion: currentPhase(phaseRef.current, phaseConfig).id === 'REVERSE_QUESTION',
-      audioStatus: voiceCaps?.inputMode === 'stepfun-asr' ? 'transcribed' : 'text_only',
+      audioStatus: voiceEnabled && voiceCaps?.inputMode !== 'text' ? 'transcribed' : 'text_only',
     };
     addMessage(msg);
     setInputValue('');
@@ -722,6 +724,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
 
   // ---------- 语音输入 ----------
   const toggleListening = async () => {
+    if (!voiceEnabled) return;
     const voice = voiceRef.current;
     if (!voice) return;
     // 抢话：AI 播报中用户开始说话 → barge-in
@@ -958,6 +961,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             onClick={() => setMicOn((v) => !v)}
             className={`p-3 rounded-2xl shrink-0 ${micOn ? 'bg-slate-100 text-slate-600' : 'bg-red-500 text-white'}`}
             title={micOn ? '静音' : '取消静音'}
+            hidden={!voiceEnabled}
           >
             {micOn ? '🎙️' : '🔇'}
           </button>
@@ -979,7 +983,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
                 }
               }}
               placeholder={
-                voiceCaps?.inputMode === 'text'
+                !voiceEnabled || voiceCaps?.inputMode === 'text'
                   ? '纯文字模式：输入你的观点...'
                   : isListening
                     ? asrPartial || '正在录音，再次点击麦克风结束...'
@@ -991,11 +995,11 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             />
             <button
               onClick={toggleListening}
-              disabled={voiceCaps?.inputMode === 'text'}
+              disabled={!voiceEnabled || voiceCaps?.inputMode === 'text'}
               className={`absolute right-4 bottom-4 p-2.5 rounded-full transition-all ${
                 isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
               } disabled:opacity-30`}
-              title={voiceCaps?.inputMode === 'text' ? '当前环境不支持语音输入' : '语音输入'}
+              title={!voiceEnabled ? '本场为纯文字练习' : voiceCaps?.inputMode === 'text' ? '当前环境不支持语音输入' : '语音输入'}
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
@@ -1015,7 +1019,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         </div>
         <div className="max-w-4xl mx-auto mt-2 flex items-center justify-between text-[10px] text-slate-400">
           <span>
-            语音输入：{voiceCaps?.inputMode === 'stepfun-asr' ? 'StepFun ASR' : voiceCaps?.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）'}
+            语音输入：{!voiceEnabled ? '未启用（纯文字练习）' : voiceCaps?.inputMode === 'stepfun-asr' ? 'StepFun ASR' : voiceCaps?.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）'}
             {' · '}
             语音输出：{voiceCaps?.outputMode === 'stepfun-tts' ? 'StepFun TTS' : voiceCaps?.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）'}
           </span>

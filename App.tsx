@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const [consent, setConsent] = useState(false);
   const [localSaveFailed, setLocalSaveFailed] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [dbAvailable, setDbAvailable] = useState(true);
 
@@ -80,6 +81,7 @@ const App: React.FC = () => {
   const enterRoom = async (result: DeviceCheckResult) => {
     setConsent(result.consentSaveTranscript);
     setCameraEnabled(result.cameraEnabled);
+    setVoiceEnabled(result.voiceEnabled);
     setFacingMode(result.facingMode);
 
     // 未同意服务端保存时不创建数据库会话，完整练习记录仅留在当前浏览器。
@@ -151,7 +153,7 @@ const App: React.FC = () => {
         try {
           let reportV15: ReportV15 | null = null;
           if (demoMode) {
-            reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs });
+            reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs, voiceEnabled });
           } else if (sessionId && consent) {
             reportV15 = await triggerAnalyze(sessionId);
           }
@@ -165,10 +167,11 @@ const App: React.FC = () => {
                 sessionStartAt: startedAt,
                 durationMs,
                 sessionId,
+                voiceEnabled,
               });
             } catch (error) {
               console.warn('在线报告不可用，切换本地规则评分:', error);
-              reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs });
+              reportV15 = buildRuleReport({ transcripts: history, events, sessionStartAt: startedAt, durationMs, voiceEnabled });
             }
           }
           setReport(reportV15);
@@ -327,6 +330,7 @@ const App: React.FC = () => {
               sessionId={sessionId}
               consentSaveTranscript={consent}
               cameraEnabled={cameraEnabled}
+              voiceEnabled={voiceEnabled}
               facingMode={facingMode}
               onFinish={finishSimulation}
               onExit={interruptSimulation}

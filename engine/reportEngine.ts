@@ -19,6 +19,8 @@ export interface ReportInput {
   events: GameEvent[];
   sessionStartAt: number;
   durationMs: number;
+  /** 是否启用麦克风语音评估；未传时为兼容旧会话按启用处理。 */
+  voiceEnabled?: boolean;
 }
 
 export interface RuleMetrics {
@@ -204,6 +206,7 @@ function thresholdScore(value: number, full: number, empty: number): number {
  */
 export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): ReportV15 {
   const m = computeRuleMetrics(input);
+  const voiceEnabled = input.voiceEnabled !== false;
   const evidence = buildEvidencePool(input);
   const contentEvidence = evidence.filter((e) => e.dimension_hint === 'content').slice(0, 5);
   const stressEvidence = evidence.filter((e) => e.dimension_hint === 'stress').slice(0, 3);
@@ -226,7 +229,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   const recoveryScore = m.interruptRecoveryMs === null ? 70 : thresholdScore(3000 - m.interruptRecoveryMs, 3000, 0); // <3s 满分
   const volumeScore = 60; // P1（音量稳定性）
   const voiceRaw = rateScore * 0.2 + fillerScore * 0.2 + pauseScore * 0.2 + recoveryScore * 0.2 + volumeScore * 0.2;
-  const voice = Math.round((voiceRaw / 100) * 25);
+  const voice = voiceEnabled ? Math.round((voiceRaw / 100) * 25) : 0;
 
   // ---- 抗压/冲突（max 20）：被质疑后回应质量 50% / 打断后恢复速度 30% / 冲突处理方式 20%
   const stressQuality = llm?.stressResponseQuality ?? (stressEvidence.length > 0 ? 60 : 55);
@@ -244,12 +247,16 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
   // ---- 视觉（M6 前不参与总分）
   const visual = { score: 0, max: 20, status: 'not_enabled' as const, evidence: [] as Evidence[], note: '视觉维度 M6 启用（摄像头分析未开启）' };
 
-  const overall = clamp(content + voice + stress + teamwork, 0, 100);
+  const overall = clamp(
+    voiceEnabled ? content + voice + stress + teamwork : Math.round(((content + stress + teamwork) / 75) * 100),
+    0,
+    100
+  );
   const performanceLevel: ReportV15['performance_level'] = overall >= 80 ? '领先' : overall >= 60 ? '良好' : '待提升';
   const performanceRank = overall >= 85 ? '前 20%' : overall >= 70 ? '前 40%' : overall >= 55 ? '中段' : '后 40%';
   const simulatedRank = overall >= 85 ? '模拟第1梯队' : overall >= 70 ? '模拟第2梯队' : overall >= 55 ? '模拟第3梯队' : '模拟待提升';
 
-  const suggestions = buildSuggestions({ m, content, voice, stress, teamwork });
+  const suggestions = buildSuggestions({ m, content, voice, stress, teamwork, voiceEnabled });
 
   return {
     session_id: null,
@@ -272,8 +279,9 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
       voice: {
         score: voice,
         max: 25,
-        evidence: voiceEvidence,
-        metrics: {
+        status: voiceEnabled ? 'enabled' : 'not_enabled',
+        evidence: voiceEnabled ? voiceEvidence : [],
+        metrics: voiceEnabled ? {
           话语权占比: m.voiceShareByTime,
           填充词占比: m.fillerRatio,
           语速WPM: m.speakingRateWpm || 'N/A（文字版无 ASR 时间戳）',
@@ -286,8 +294,10 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
                   .map((b) => `${Math.round(b.bucketStartMs / 60000)}min/${b.userChars}字`)
                   .join(' ')
               : 'N/A',
-        },
-        note: '语音副语言特征需 ASR 时间戳（M2），当前为文字版规则近似',
+        } : undefined,
+        note: voiceEnabled
+          ? '语音副语言特征需 ASR 时间戳（M2），当前为文字版规则近似'
+          : '本场使用纯文字练习，未采集语速、停顿或音量；综合分已按其余可评估维度归一化。',
       },
       visual,
       stress: {
@@ -308,6 +318,7 @@ export function buildRuleReport(input: ReportInput, llm?: LlmSemanticScores): Re
         },
       },
     },
+    score_note: voiceEnabled ? undefined : '本场未启用语音评估；综合分按内容贡献、抗压/冲突和团队协作维度归一化计算。',
     suggestions,
   };
 }
@@ -319,13 +330,14 @@ export function buildSuggestions(scores: {
   voice: number;
   stress: number;
   teamwork: number;
+  voiceEnabled?: boolean;
 }): string[] {
-  const { m, content, voice, stress, teamwork } = scores;
+  const { m, content, voice, stress, teamwork, voiceEnabled = true } = scores;
   const tips: string[] = [];
   if (m.voiceShareByTime < 25) tips.push('下次练习争取更早发言，前 3 分钟至少贡献 1 个核心观点');
   if (m.userMessageCount < 4) tips.push('增加有效发言次数，目标每场至少 5 次有观点的发言');
   if (content < 24) tips.push('发言使用"首先/其次/最后"结构化表达，让观点更清晰');
-  if (voice < 15 && m.fillerRatio >= 3) tips.push(`减少口头填充词（当前约 ${m.fillerRatio}% 的字数含"嗯/那个"等）`);
+  if (voiceEnabled && voice < 15 && m.fillerRatio >= 3) tips.push(`减少口头填充词（当前约 ${m.fillerRatio}% 的字数含"嗯/那个"等）`);
   if (stress < 12 && m.interruptedCount > 0) tips.push('被质疑或打断后，先确认对方观点再回应，争取 3 秒内恢复');
   if (teamwork < 9) tips.push('多回应他人观点（同意并推进/质疑后给方案），目标每场回应 ≥3 次');
   if (tips.length === 0) tips.push('表现均衡，尝试在总结阶段主动承担汇报，展示领导力');

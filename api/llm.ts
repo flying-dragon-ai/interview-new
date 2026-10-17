@@ -250,7 +250,13 @@ ${history.map((m) => `${m.senderName}: ${m.content}`).join('\n')}
       const sessionStartAt = typeof payload.sessionStartAt === 'number' ? payload.sessionStartAt : Date.now();
       const durationMs = typeof payload.durationMs === 'number' ? payload.durationMs : 25 * 60 * 1000;
 
-      const input: ReportInput = { transcripts: messages, events, sessionStartAt, durationMs };
+      const input: ReportInput = {
+        transcripts: messages,
+        events,
+        sessionStartAt,
+        durationMs,
+        voiceEnabled: typeof payload.voiceEnabled === 'boolean' ? payload.voiceEnabled : true,
+      };
       const userTranscripts = messages
         .filter((m) => m.senderId === 'user' && m.type === 'message')
         .map((m) => ({ content: m.content, timestampMs: Math.max(0, m.timestamp - sessionStartAt) }));

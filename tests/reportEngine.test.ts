@@ -92,6 +92,17 @@ test('报告 v1.5：LLM 语义分注入后内容分采用 LLM 结构分', () => 
   assert.ok(withLlm.overall_score > ruleOnly.overall_score);
 });
 
+test('纯文字练习：语音维度标记未评估，综合分按可评估维度归一化', () => {
+  const report = buildRuleReport({ ...input, voiceEnabled: false });
+  const activeScore = report.dimensions.content.score + report.dimensions.stress.score + report.dimensions.teamwork.score;
+  assert.equal(report.dimensions.voice.status, 'not_enabled');
+  assert.equal(report.dimensions.voice.score, 0);
+  assert.deepEqual(report.dimensions.voice.evidence, []);
+  assert.equal(report.overall_score, Math.round((activeScore / 75) * 100));
+  assert.match(report.score_note ?? '', /未启用语音评估/);
+  assert.ok(report.suggestions.every((suggestion) => !/口头填充词/.test(suggestion)));
+});
+
 test('改进建议：低话语权/低协作给出可执行建议（F.4）', () => {
   const m = computeRuleMetrics(input);
   const tips = buildSuggestions({ m, content: 10, voice: 10, stress: 10, teamwork: 3 });

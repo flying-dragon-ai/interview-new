@@ -226,6 +226,7 @@ export async function generateReportV15(params: {
   sessionStartAt: number;
   durationMs: number;
   sessionId?: number | null;
+  voiceEnabled?: boolean;
 }): Promise<ReportV15> {
   const { ok, data, error } = await postLlm<ReportV15>({
     action: 'analyze',
@@ -236,6 +237,7 @@ export async function generateReportV15(params: {
       events: params.events,
       sessionStartAt: params.sessionStartAt,
       durationMs: params.durationMs,
+      voiceEnabled: params.voiceEnabled,
       session_id: params.sessionId ?? null,
     },
     session_id: params.sessionId ?? null,
