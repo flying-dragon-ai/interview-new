@@ -68,7 +68,7 @@ pnpm contracts:deploy:testnet
 | 合约验证 / 交易链接 | 部署后写入本节 |
 | 演示流程 | [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md) |
 | 项目截图 | 现存 `screenshots/homepage.jpg` 是旧版页面，不代表当前 MVP；需替换后再作为参赛截图 |
-| 团队成员 | 待补充实际参赛成员姓名与角色 |
+| 团队成员 | 个人项目 · `linglingqi`（GitHub：[@llingqi77-tech](https://github.com/llingqi77-tech)） |
 
 Preview 地址受 Vercel 项目保护；公开比赛演示仍需在确认访问策略后部署或开放。README 不填入虚构的合约地址或交易链接。
 
