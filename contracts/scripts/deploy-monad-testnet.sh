@@ -47,5 +47,5 @@ echo "Network: Monad Testnet (10143)"
 echo "Predicted contract: $PREDICTED"
 echo "The next command sends a deployment transaction from the active Alchemy Agent Wallet session."
 alchemy evm contract call "$FACTORY" 'deployCreate2(bytes32,bytes)' \
-  --args "$SALT,$INIT_CODE" -n monad-testnet
+  --args "[\"$SALT\",\"$INIT_CODE\"]" -n monad-testnet
 echo "After the call confirms, verify code at $PREDICTED and set VITE_INTERVIEW_CREDENTIAL_ADDRESS=$PREDICTED"
