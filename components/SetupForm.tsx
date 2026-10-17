@@ -22,9 +22,9 @@ interface SetupFormProps {
 }
 
 const ROLE_BADGE: Record<string, { label: string; className: string }> = {
-  AGGRESSIVE: { label: '高冲突', className: 'bg-red-500' },
-  STRUCTURED: { label: '高协作', className: 'bg-blue-500' },
-  DETAIL: { label: '中立', className: 'bg-emerald-500' },
+  AGGRESSIVE: { label: '高冲突', className: 'bg-red-400/15 border-red-400/30 text-red-300' },
+  STRUCTURED: { label: '高协作', className: 'bg-blue-400/15 border-blue-400/30 text-blue-300' },
+  DETAIL: { label: '中立', className: 'bg-emerald-400/15 border-emerald-400/30 text-emerald-300' },
 };
 
 const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
@@ -85,44 +85,50 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-      <div className="bg-blue-600 px-8 py-6">
-        <h1 className="text-2xl font-bold text-white text-center">开始练习</h1>
-        <p className="text-blue-100 text-center text-sm mt-1">填写信息 · 选择面试官形象 · 生成专属题目</p>
+    <div className="w-full max-w-3xl mx-auto glass-panel overflow-hidden">
+      {/* 头部：超大标题 + 品牌渐变关键词 + 英文小字（替换原蓝色实色块） */}
+      <div className="px-8 pt-10 pb-6 text-center">
+        <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">
+          开始<span className="text-gradient-brand">练习</span>
+        </h1>
+        <p className="mt-3 text-[11px] md:text-xs text-white/40 tracking-widest uppercase">
+          Leaderless Group Discussion Simulator
+        </p>
+        <p className="text-white/60 text-sm mt-3">填写信息 · 选择面试官形象 · 生成专属题目</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-8 space-y-6">
+      <form onSubmit={handleSubmit} className="stagger px-8 pb-8 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">目标公司</label>
+            <label className="block text-sm font-semibold text-white/60 mb-2">目标公司</label>
             <input
               type="text"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
               placeholder="如：字节跳动、腾讯、阿里"
-              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition"
+              className="glass-input px-4 py-3"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">应聘岗位</label>
+            <label className="block text-sm font-semibold text-white/60 mb-2">应聘岗位</label>
             <input
               type="text"
               value={jobTitle}
               onChange={(e) => setJobTitle(e.target.value)}
               placeholder="如：产品经理、运营专员"
-              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition"
+              className="glass-input px-4 py-3"
               required
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">题目类型</label>
+          <label className="block text-sm font-semibold text-white/60 mb-2">题目类型</label>
           <select
             value={topicType}
             onChange={(e) => setTopicType(e.target.value)}
-            className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 outline-none"
+            className="glass-input px-4 py-3"
           >
             {TOPIC_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -132,21 +138,21 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           </select>
         </div>
 
-        {/* 角色选择（12 角色卡抽 3） */}
+        {/* 角色选择（12 角色卡抽 3）：Bento 玻璃卡网格 */}
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-sm font-semibold text-slate-700">
-              选择面试官形象（{selectedIds.length}/3）
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-semibold text-white/60">
+              选择面试官形象（<span className="tabular-nums">{selectedIds.length}</span>/3）
             </label>
             <button
               type="button"
               onClick={handleAutoSelect}
-              className="text-sm text-blue-600 hover:underline font-medium"
+              className="glass-btn-ghost text-xs px-3 py-1.5"
             >
               随机分配（按岗位匹配）
             </button>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto p-1">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-80 overflow-y-auto p-1 glass-scroll">
             {ROLE_CARDS.map((card) => {
               const preset = findAvatarPreset(card.avatar.preset_id);
               const selected = selectedIds.includes(card.id);
@@ -156,27 +162,25 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
                   key={card.id}
                   type="button"
                   onClick={() => toggleCard(card.id)}
-                  className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
-                    selected ? 'border-blue-500 bg-blue-50 shadow' : 'border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`glass-card bounce-liquid flex flex-col items-center p-3 ${selected ? 'glass-selected' : ''}`}
                 >
-                  <img src={preset?.asset_url} alt={card.name} className="w-12 h-12 rounded-full" />
-                  <span className="mt-1 text-xs font-semibold text-slate-700 whitespace-nowrap">{card.name}</span>
-                  <span className={`mt-0.5 text-[9px] px-1.5 py-0.5 rounded text-white ${badge.className}`}>{badge.label}</span>
-                  <span className="text-[9px] text-slate-400 mt-0.5">{card.industry}</span>
+                  <img src={preset?.asset_url} alt={card.name} className="w-14 h-14 rounded-full border border-white/15" />
+                  <span className="mt-2 text-xs font-semibold text-white whitespace-nowrap">{card.name}</span>
+                  <span className={`glass-chip mt-1.5 text-[10px] px-2 py-0.5 border ${badge.className}`}>{badge.label}</span>
+                  <span className="text-[10px] text-white/40 mt-1">{card.industry}</span>
                 </button>
               );
             })}
           </div>
           {selectedIds.length > 0 && violations.length > 0 && (
-            <div className="mt-2 text-xs text-amber-600 space-y-0.5">
+            <div className="mt-2 text-xs text-amber-300/80 space-y-0.5">
               {violations.map((v) => (
                 <div key={v.rule}>⚠️ {v.message}</div>
               ))}
             </div>
           )}
           {selectedIds.length === 3 && violations.length === 0 && (
-            <div className="mt-2 text-xs text-emerald-600">✅ 组合满足约束：音色/形象/策略不重复，性格互补</div>
+            <div className="mt-2 text-xs text-emerald-300/80">✅ 组合满足约束：音色/形象/策略不重复，性格互补</div>
           )}
         </div>
 
@@ -184,7 +188,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           type="button"
           onClick={handleGenerate}
           disabled={isGenerating || !company || !jobTitle}
-          className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+          className="glass-btn w-full py-3 font-medium"
         >
           {isGenerating ? (
             <>
@@ -201,23 +205,28 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
 
         {topic && (
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">群面题目</label>
-            <textarea
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              className="w-full h-48 px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition resize-none text-sm leading-relaxed"
-              placeholder="生成的题目将显示在这里..."
-            />
+            <label className="block text-sm font-semibold text-white/60 mb-2">群面题目</label>
+            {/* 题目卡：white/8 玻璃 + 左侧 3px 品牌渐变色条 */}
+            <div className="relative glass-card p-4 pl-6">
+              <div className="absolute left-3 top-4 bottom-4 w-[3px] rounded-full bg-gradient-to-b from-brand to-brand-soft" aria-hidden="true" />
+              <textarea
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                className="w-full h-44 bg-transparent outline-none resize-none text-sm leading-relaxed text-white/85 placeholder:text-white/30"
+                placeholder="生成的题目将显示在这里..."
+              />
+            </div>
           </div>
         )}
 
         {topic && (
+          /* 主 CTA：液态折射层 + 品牌渐变微光，尺寸大一个量级 */
           <button
             type="submit"
             disabled={selectedCards.length !== 3 || violations.length > 0}
-            className="w-full py-4 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition text-base disabled:opacity-40"
+            className="liquid glass-btn-primary w-full py-5 text-lg font-bold"
           >
-            下一步：设备检测
+            <span className="liquid-content">开始设备检测</span>
           </button>
         )}
       </form>

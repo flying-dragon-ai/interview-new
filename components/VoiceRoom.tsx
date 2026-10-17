@@ -39,18 +39,18 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 房间上下文条 */}
-      <div className="hidden md:flex items-center gap-3 px-4 py-1.5 bg-slate-900 text-white text-[11px]">
-        <span className="font-bold">{state.company || '未填写公司'}</span>
-        <span className="text-slate-400">·</span>
+      <div className="hidden md:flex items-center gap-3 px-4 py-1.5 backdrop-blur-xl bg-white/[0.06] border-b border-white/10 text-white/60 text-[11px]">
+        <span className="font-bold text-white">{state.company || '未填写公司'}</span>
+        <span className="text-white/25">·</span>
         <span>{state.jobTitle || '未填写岗位'}</span>
-        <span className="text-slate-400">·</span>
+        <span className="text-white/25">·</span>
         <span>{roles.length} 位 AI 面试官</span>
-        <span className="text-slate-400">·</span>
+        <span className="text-white/25">·</span>
         <span>
           输入 {inputLabel} / 输出 {outputLabel}
         </span>
-        {!sessionId && <span className="text-amber-300">· 本地模式（未落库）</span>}
-        <button onClick={onExit} className="ml-auto px-3 py-0.5 bg-white/10 hover:bg-white/20 rounded-full font-bold">
+        {!sessionId && <span className="glass-chip badge-warning text-[10px] px-2 py-0.5">本地模式（未落库）</span>}
+        <button onClick={onExit} className="ml-auto glass-btn-danger rounded-full px-3 py-0.5 text-[11px] font-bold">
           退出房间
         </button>
       </div>
