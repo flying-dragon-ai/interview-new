@@ -81,11 +81,10 @@ npm install -g @alchemy/cli@latest
 alchemy auth
 alchemy wallet connect --mode session
 alchemy wallet use session
-alchemy config set network monad-testnet
 pnpm contracts:deploy:testnet
 ```
 
-部署脚本将输出 CREATE2 预测地址和 Alchemy 调用结果。等待交易确认后核对：
+部署脚本显式指定 `monad-testnet`，因此不需要设置 Alchemy CLI 默认网络。脚本按 CreateX 规则对普通 salt 做保护性哈希，再输出 CREATE2 预测地址。交易确认后核对：
 
 ```bash
 cast code <预测地址> --rpc-url https://testnet-rpc.monad.xyz
@@ -98,6 +97,8 @@ INTERVIEW_CREDENTIAL_ADDRESS=0x... pnpm contracts:verify:testnet
 ```
 
 README 记录合约地址、部署交易哈希和验证结果。未部署前不填写占位地址为真实地址。
+
+当前 Monad Testnet 部署：`0x365b8d1dbd2968db5c9f05f34f8ce496cae9d270`；交易：`0x6fff4451c057b0abb2bca57603bc85f99daeb1c9a695b7d6001d274edc485085`。源码已在 MonadVision 和 MonadScan 验证通过。CreateX 事件日志中的部署地址是最终事实来源；如果自己修改部署参数，以实际交易事件为准。
 
 ## 部署后提交清单
 

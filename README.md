@@ -62,15 +62,15 @@ pnpm contracts:deploy:testnet
 | 项目 | 当前状态 |
 | --- | --- |
 | Web Demo | [最新 Vercel Preview](https://interview-second-nkbi3e7a3-llingqi77-4019s-projects.vercel.app) 已部署并显示 Ready；当前受 Vercel 登录保护，未开放匿名访问 |
-| Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待使用用户授权的钱包会话部署 |
+| Monad Testnet 合约 | 已部署并验证：[InterviewCredential](https://testnet.monadscan.com/address/0x365b8d1dbd2968db5c9f05f34f8ce496cae9d270) |
 | 网络 / 区块浏览器 | Monad Testnet · Chain ID `10143` · [Monad Testnet Explorer](https://testnet.monadscan.com/) |
 | GitHub 仓库 | [interview-new](https://github.com/llingqi77-tech/interview-new)；本次 MVP 在 `codex/monad-blitz-mvp` 分支 |
-| 合约验证 / 交易链接 | 部署后写入本节 |
+| 合约验证 / 交易链接 | [MonadScan 验证合约](https://testnet.monadscan.com/address/0x365b8d1dbd2968db5c9f05f34f8ce496cae9d270) · [部署交易](https://testnet.monadscan.com/tx/0x6fff4451c057b0abb2bca57603bc85f99daeb1c9a695b7d6001d274edc485085) |
 | 演示流程 | [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md) |
 | 项目截图 | 现存 `screenshots/homepage.jpg` 是旧版页面，不代表当前 MVP；需替换后再作为参赛截图 |
 | 团队成员 | 个人项目 · `linglingqi`（GitHub：[@llingqi77-tech](https://github.com/llingqi77-tech)） |
 
-Preview 地址受 Vercel 项目保护；公开比赛演示仍需在确认访问策略后部署或开放。README 不填入虚构的合约地址或交易链接。
+Preview 地址受 Vercel 项目保护；公开比赛演示仍需完成访问配置。合约地址和交易链接均来自 Monad Testnet 的已确认链上记录。
 
 详细实现、证明文件格式和链上隐私边界见 [`docs/monad-credential-mvp.md`](./docs/monad-credential-mvp.md)。
 

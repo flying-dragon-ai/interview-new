@@ -33,8 +33,11 @@ cd "$CONTRACTS_DIR"
 CREATION_CODE="$("${FORGE[@]}" inspect src/InterviewCredential.sol:InterviewCredential bytecode)"
 INIT_CODE="$CREATION_CODE"
 INIT_CODE_HASH="$("${CAST[@]}" keccak "$INIT_CODE")"
+# CreateX hashes ordinary (non-pseudo-random) salts before CREATE2. Its
+# computeCreate2Address helper expects that guarded salt, not the raw input.
+GUARDED_SALT="$("${CAST[@]}" keccak "$SALT")"
 PREDICTED="$("${CAST[@]}" call "$FACTORY" \
-  'computeCreate2Address(bytes32,bytes32)(address)' "$SALT" "$INIT_CODE_HASH" \
+  'computeCreate2Address(bytes32,bytes32)(address)' "$GUARDED_SALT" "$INIT_CODE_HASH" \
   --rpc-url "$RPC_URL")"
 EXISTING_CODE="$("${CAST[@]}" code "$PREDICTED" --rpc-url "$RPC_URL")"
 if [[ "$EXISTING_CODE" != "0x" ]]; then
