@@ -63,10 +63,12 @@ pnpm contracts:deploy:testnet
 | --- | --- |
 | Web Demo | [最新 Vercel Preview](https://interview-second-ccqw451ta-llingqi77-4019s-projects.vercel.app) 已部署并显示 Ready；当前受 Vercel 登录保护，未开放匿名访问 |
 | Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待使用用户授权的钱包会话部署 |
+| 网络 / 区块浏览器 | Monad Testnet · Chain ID `10143` · [Monad Testnet Explorer](https://testnet.monadscan.com/) |
 | GitHub 仓库 | [interview-new](https://github.com/llingqi77-tech/interview-new)；本次 MVP 在 `codex/monad-blitz-mvp` 分支 |
 | 合约验证 / 交易链接 | 部署后写入本节 |
 | 演示流程 | [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md) |
 | 项目截图 | 现存 `screenshots/homepage.jpg` 是旧版页面，不代表当前 MVP；需替换后再作为参赛截图 |
+| 团队成员 | 待补充实际参赛成员姓名与角色 |
 
 Preview 地址受 Vercel 项目保护；公开比赛演示仍需在确认访问策略后部署或开放。README 不填入虚构的合约地址或交易链接。
 
