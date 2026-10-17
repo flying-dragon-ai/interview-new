@@ -8,9 +8,10 @@ import RecentPracticeList from './RecentPracticeList';
 
 interface Props {
   onStart: (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[]; resumeCheckpoint?: PhaseState | null; demoMode?: boolean }) => void;
+  onViewLocalReport: (id: string) => void;
 }
 
-const QuestionBankHome: React.FC<Props> = ({ onStart }) => {
+const QuestionBankHome: React.FC<Props> = ({ onStart, onViewLocalReport }) => {
   const [industry, setIndustry] = useState('internet');
   const [company, setCompany] = useState('');
   const [jobKey, setJobKey] = useState('internet_product');
@@ -45,7 +46,7 @@ const QuestionBankHome: React.FC<Props> = ({ onStart }) => {
         <div className="mocksharp-generated"><div className="mocksharp-generated-label">预设题目 · {industryLabel} / {job.label}</div><p>{selectedTopic}</p><label className="mb-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800"><input type="checkbox" checked={demoMode} onChange={(event) => setDemoMode(event.target.checked)} className="mt-1 accent-[#171717]" /><span><b>比赛演示模式</b><small className="block text-xs text-slate-600">群面缩短至约 1 分钟，报告由本地规则引擎生成</small></span></label><button type="button" className="mocksharp-primary" onClick={start} disabled={!selectedQuestion}>开始练习 →</button></div>
       </div>
     </section>
-    <section className="mocksharp-recent"><div className="mocksharp-section-label">最近练习</div><RecentPracticeList onRetry={(item) => { setCompany(item.company || ''); setTopicType(item.topicType || 'priority_ranking'); }} /></section>
+    <section className="mocksharp-recent"><div className="mocksharp-section-label">最近练习</div><RecentPracticeList onViewLocalReport={onViewLocalReport} onRetry={(item) => { setCompany(item.company || ''); setTopicType(item.topicType || 'priority_ranking'); }} /></section>
   </div>;
 };
 export default QuestionBankHome;

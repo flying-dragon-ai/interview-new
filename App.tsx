@@ -17,6 +17,12 @@ import {
 } from './src/api';
 import type { PhaseState } from './engine/phaseEngine';
 import { buildRuleReport } from './engine/reportEngine';
+import {
+  createLocalPracticeId,
+  deleteLocalPracticeRecord,
+  getLocalPracticeRecord,
+  saveLocalPracticeRecord,
+} from './src/localPractice';
 
 /**
  * 应用主流程（PRD 5.2 目标流程）
@@ -38,7 +44,9 @@ const App: React.FC = () => {
   const [topicType, setTopicType] = useState('business_case');
   const [demoMode, setDemoMode] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [localRecordId, setLocalRecordId] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
+  const [localSaveFailed, setLocalSaveFailed] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [dbAvailable, setDbAvailable] = useState(true);
@@ -74,17 +82,35 @@ const App: React.FC = () => {
     setCameraEnabled(result.cameraEnabled);
     setFacingMode(result.facingMode);
 
-    // 创建会话（数据库不可用时降级本地模式）
-    const session = await createSession({
-      company: state.company,
-      jobTitle: state.jobTitle,
-      topic: state.topic,
-      topicType,
-      roles: roles.map((r) => r.id),
-      voiceEnabled: result.voiceEnabled,
-      cameraEnabled: result.cameraEnabled,
-      walletAddress: null,
-    });
+    // 未同意服务端保存时不创建数据库会话，完整练习记录仅留在当前浏览器。
+    const session = result.consentSaveTranscript
+      ? await createSession({
+          company: state.company,
+          jobTitle: state.jobTitle,
+          topic: state.topic,
+          topicType,
+          roles: roles.map((r) => r.id),
+          voiceEnabled: result.voiceEnabled,
+          cameraEnabled: result.cameraEnabled,
+          walletAddress: null,
+        })
+      : null;
+    // 用户未同意服务器保存，或数据库不可用时，转为本机持久化。
+    const localId = session ? null : createLocalPracticeId();
+    setLocalRecordId(localId);
+    setLocalSaveFailed(false);
+    if (localId) {
+      const saved = saveLocalPracticeRecord({
+        id: localId,
+        company: state.company,
+        jobTitle: state.jobTitle,
+        topic: state.topic,
+        topicType,
+        status: 'in_progress',
+        startedAt: Date.now(),
+      });
+      setLocalSaveFailed(!saved);
+    }
     if (session) {
       setSessionId(session.id);
       setDbAvailable(true);
@@ -106,6 +132,12 @@ const App: React.FC = () => {
     setFinishedMessages(history);
     setFinishedEvents(events);
     setSessionStartAt(startedAt);
+    if (localRecordId) {
+      const localRecord = getLocalPracticeRecord(localRecordId);
+      if (localRecord) {
+        setLocalSaveFailed(!saveLocalPracticeRecord({ ...localRecord, status: 'finished', finishedAt: Date.now(), messages: history, events }));
+      }
+    }
     setIsLoadingFeedback(true);
     setFeedbackError(false);
 
@@ -140,6 +172,12 @@ const App: React.FC = () => {
             }
           }
           setReport(reportV15);
+          if (localRecordId) {
+            const localRecord = getLocalPracticeRecord(localRecordId);
+            if (localRecord) {
+              setLocalSaveFailed(!saveLocalPracticeRecord({ ...localRecord, status: 'finished', finishedAt: Date.now(), messages: history, events, report: reportV15, score: reportV15.overall_score }));
+            }
+          }
           try {
             const items = JSON.parse(localStorage.getItem('lgd-practice-history') || '[]');
             localStorage.setItem('lgd-practice-history', JSON.stringify(items.map((item: { topic?: string }) => item.topic === state.topic ? { ...item, status: 'finished', score: reportV15?.overall_score, finishedAt: Date.now() } : item)));
@@ -179,11 +217,17 @@ const App: React.FC = () => {
     return deleteSession(id);
   };
 
+  const handleDeleteLocalRecord = (id: string): boolean => deleteLocalPracticeRecord(id);
+
   const interruptSimulation = () => {
     try {
       const items = JSON.parse(localStorage.getItem('lgd-practice-history') || '[]');
       localStorage.setItem('lgd-practice-history', JSON.stringify(items.map((item: { topic?: string }) => item.topic === state.topic ? { ...item, status: 'interrupted', interruptedAt: Date.now() } : item)));
     } catch { /* local history is best effort */ }
+    if (localRecordId) {
+      const localRecord = getLocalPracticeRecord(localRecordId);
+      if (localRecord) saveLocalPracticeRecord({ ...localRecord, status: 'interrupted' });
+    }
     if (sessionId) updateSessionStatus(sessionId, 'INTERRUPTED');
     setState((prev) => ({ ...prev, status: 'INTERRUPTED' }));
   };
@@ -200,10 +244,39 @@ const App: React.FC = () => {
     });
     setRoles([]);
     setSessionId(null);
+    setLocalRecordId(null);
     setReport(null);
     setLegacyFeedback(null);
     setFinishedMessages([]);
     setFinishedEvents([]);
+    setLocalSaveFailed(false);
+  };
+
+  const openLocalReport = (id: string) => {
+    const record = getLocalPracticeRecord(id);
+    if (!record?.report) return;
+    setLocalRecordId(id);
+    setConsent(false);
+    setDbAvailable(false);
+    setSessionId(null);
+    setDemoMode(false);
+    setState({
+      topic: record.topic,
+      jobTitle: record.jobTitle,
+      company: record.company,
+      messages: record.messages ?? [],
+      status: 'FINISHED',
+      activeCharacterId: null,
+      round: record.messages?.length ?? 0,
+    });
+    setReport(record.report);
+    setLegacyFeedback(null);
+    setFinishedMessages(record.messages ?? []);
+    setFinishedEvents(record.events ?? []);
+    setSessionStartAt(record.startedAt);
+    setIsLoadingFeedback(false);
+    setFeedbackError(false);
+    setLocalSaveFailed(false);
   };
 
   return (
@@ -215,7 +288,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             {!dbAvailable && state.status !== 'IDLE' && (
                 <span className="text-[10px] text-[#dfff00] border border-white/20 rounded-full px-2 py-0.5">
-                本地模式（未配置数据库）
+                本地模式（{consent ? '未配置数据库' : '未同意云端保存'}）
               </span>
             )}
             <button onClick={() => setShowPrivacy(true)} className="text-sm text-white/60 hover:text-[#dfff00]">
@@ -232,7 +305,7 @@ const App: React.FC = () => {
       <div className={state.status === 'DISCUSSING' ? 'h-[calc(100vh-57px)]' : 'p-4 md:p-6'}>
         {state.status === 'IDLE' && (
           <div className="max-w-3xl mx-auto">
-            <QuestionBankHome onStart={startPreparation} />
+            <QuestionBankHome onStart={startPreparation} onViewLocalReport={openLocalReport} />
           </div>
         )}
 
@@ -274,6 +347,11 @@ const App: React.FC = () => {
 
         {state.status === 'FINISHED' && (
           <div className="max-w-4xl mx-auto">
+            {localSaveFailed && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                浏览器存储空间不足，本次报告暂时只在当前页面显示；请清理不需要的本地练习记录后重试。
+              </div>
+            )}
             {isLoadingFeedback ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <div className="relative">
@@ -295,6 +373,8 @@ const App: React.FC = () => {
                 sessionId={sessionId}
                 onRestart={restart}
                 onDeleteRecords={handleDeleteRecords}
+                localRecordId={localRecordId}
+                onDeleteLocalRecord={handleDeleteLocalRecord}
               />
             ) : legacyFeedback ? (
               <div className="space-y-4">

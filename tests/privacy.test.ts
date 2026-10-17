@@ -62,6 +62,24 @@ test('4.1.9: 同意门控——转写/事件/报告落库均需 consentSaveTrans
   assert.ok(/if \(sessionId && consent\)[\s\S]{0,120}saveReport/.test(app), '报告落库缺少同意门控');
 });
 
+test('4.1.9: 拒绝服务端保存仍可本地练习，并且本地记录可回看与删除', () => {
+  const deviceCheck = read('components/DeviceCheck.tsx');
+  const canEnter = deviceCheck.match(/const canEnter = ([^;]+);/)?.[1] ?? '';
+  assert.ok(canEnter.includes('micReady'), '进入房间仍需完成麦克风检测');
+  assert.ok(!canEnter.includes('consent'), '拒绝服务端保存不应阻断练习');
+  assert.ok(deviceCheck.includes('不勾选也可继续'), '设备检测页未说明本地练习选项');
+
+  const app = read('App.tsx');
+  assert.ok(/result\.consentSaveTranscript\s*\?\s*await createSession/.test(app), '拒绝后仍会创建服务端会话');
+  assert.ok(/saveLocalPracticeRecord/.test(app), '拒绝后没有保存本地练习记录');
+  assert.ok(/openLocalReport/.test(app), '本地报告无法从历史记录打开');
+  assert.ok(/deleteLocalPracticeRecord/.test(app), '本地练习缺少删除路径');
+
+  const policy = read('components/PrivacyPolicy.tsx');
+  assert.ok(policy.includes('不勾选时不创建服务端会话'), '隐私政策未说明拒绝后的保存范围');
+  assert.ok(policy.includes('即使选择本地保存'), '隐私政策未披露第三方 AI 处理');
+});
+
 test('C7: 形象合规——全部为风格化虚拟形象（dicebear），无真实姓名/肖像', () => {
   const avatars = read('data/avatars.ts');
   const urls = avatars.match(/asset_url: '([^']+)'/g) ?? [];

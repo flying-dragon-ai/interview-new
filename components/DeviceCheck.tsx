@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
  * 设备检测与准备流程（PRD 4.1.2 / US-01 / 5.2）
  * 依次检测：麦克风（权限 + 输入音量）→ 摄像头（权限 + 画面预览）→ 扬声器 → 网络。
  * 移动端额外：前后摄像头切换、横竖屏提示、省电模式提示、移动网络提示。
- * 「跳过摄像头」→ 纯语音模式可进入。隐私同意（C4）后才保存转写与聚合特征。
+ * 「跳过摄像头」→ 纯语音模式可进入。隐私同意（C4）只控制服务端保存；拒绝后仍可本地练习。
  */
 
 export interface DeviceCheckResult {
@@ -170,7 +170,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
   };
 
   const micReady = micStatus === 'passed' || micStatus === 'failed'; // 失败也可继续（纯文字）
-  const canEnter = micReady && consent && (cameraStatus !== 'pending' || !cameraEnabled);
+  const canEnter = micReady && (cameraStatus !== 'pending' || !cameraEnabled);
 
   const statusIcon = (s: CheckStatus) =>
     s === 'passed' ? '✅' : s === 'failed' ? '❌' : s === 'skipped' ? '⏭️' : s === 'checking' ? '⏳' : '⬜';
@@ -278,10 +278,12 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
           <label className="flex items-start gap-3 cursor-pointer">
             <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-1 w-4 h-4" />
             <span className="text-sm text-slate-700">
-              我同意保存本次群面的<b>转写文本与聚合特征</b>用于面后评估；<b>原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成（0 字节上传）。
-              第三方 API（DeepSeek / StepFun）按隐私政策处理数据。
+              我同意将本次群面的<b>转写文本与聚合特征保存到群证服务器</b>用于面后评估。<b>原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成。
             </span>
           </label>
+          <p className="ml-7 mt-2 text-xs leading-5 text-slate-500">
+            不勾选也可继续：会话、转写和报告仅保存在当前浏览器，不上传到群证服务器。AI 互动/语音识别仍会按隐私政策向 DeepSeek / StepFun 发送必要文本或音频。
+          </p>
         </div>
         {/* 群面阶段说明（PRD 4.1.3） */}
         <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100">
@@ -304,7 +306,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
             disabled={!canEnter}
             className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-40"
           >
-            进入群面房间
+            {consent ? '进入群面房间' : '本地练习并继续 →'}
           </button>
         </div>
       </div>

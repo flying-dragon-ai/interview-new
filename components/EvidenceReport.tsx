@@ -16,8 +16,10 @@ interface EvidenceReportProps {
   events?: GameEvent[];
   sessionStartAt?: number;
   sessionId?: number | null;
+  localRecordId?: string | null;
   onRestart: () => void;
   onDeleteRecords?: (sessionId: number) => Promise<boolean> | boolean;
+  onDeleteLocalRecord?: (id: string) => boolean;
 }
 
 function formatTs(ms: number): string {
@@ -53,18 +55,28 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
   events = [],
   sessionStartAt = 0,
   sessionId = null,
+  localRecordId = null,
   onRestart,
   onDeleteRecords,
+  onDeleteLocalRecord,
 }) => {
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [highlightMsgIndex, setHighlightMsgIndex] = useState<number | null>(null);
 
   const handleDelete = async () => {
-    if (!sessionId || !onDeleteRecords) return;
+    if (sessionId && onDeleteRecords) {
+      if (!window.confirm('确认删除本次练习的全部记录？删除后不可恢复。')) return;
+      setDeleting(true);
+      const ok = await onDeleteRecords(sessionId);
+      setDeleting(false);
+      if (ok) setDeleted(true);
+      return;
+    }
+    if (!localRecordId || !onDeleteLocalRecord) return;
     if (!window.confirm('确认删除本次练习的全部记录？删除后不可恢复。')) return;
     setDeleting(true);
-    const ok = await onDeleteRecords(sessionId);
+    const ok = onDeleteLocalRecord(localRecordId);
     setDeleting(false);
     if (ok) setDeleted(true);
   };
@@ -213,14 +225,14 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
       {/* 隐私与删除 */}
       <div className="mb-8 p-4 rounded-2xl bg-slate-50 border border-slate-100 text-xs text-slate-500 leading-relaxed">
         隐私说明：原始音频/视频默认不保存；本报告基于转写文本与聚合特征生成。第三方 API（DeepSeek / StepFun）按隐私政策处理数据。
-        {sessionId && onDeleteRecords && (
+        {((sessionId && onDeleteRecords) || (localRecordId && onDeleteLocalRecord)) && (
           <div className="mt-3">
             <button
               onClick={handleDelete}
               disabled={deleting || deleted}
               className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-100 disabled:opacity-50"
             >
-              {deleted ? '已删除本次记录' : deleting ? '删除中...' : '删除本次记录（不可恢复）'}
+              {deleted ? '已删除本次记录' : deleting ? '删除中...' : localRecordId ? '删除本地练习记录（不可恢复）' : '删除本次记录（不可恢复）'}
             </button>
           </div>
         )}
