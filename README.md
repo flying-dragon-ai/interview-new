@@ -61,7 +61,7 @@ pnpm contracts:deploy:testnet
 
 | 项目 | 当前状态 |
 | --- | --- |
-| Web Demo | [Vercel Preview](https://interview-second-7vz56kxn5-llingqi77-4019s-projects.vercel.app) 已部署；当前受 Vercel 登录保护，未开放匿名访问 |
+| Web Demo | [最新 Vercel Preview](https://interview-second-mvikfxv87-llingqi77-4019s-projects.vercel.app) 已部署并显示 Ready；当前受 Vercel 登录保护，未开放匿名访问 |
 | Monad Testnet 合约 | 合约源码、Foundry 测试与部署脚本已准备；实际地址待使用用户授权的钱包会话部署 |
 | GitHub 仓库 | [interview-new](https://github.com/llingqi77-tech/interview-new)；本次 MVP 在 `codex/monad-blitz-mvp` 分支 |
 | 合约验证 / 交易链接 | 部署后写入本节 |
