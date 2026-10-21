@@ -27,17 +27,32 @@ export interface RolePersona {
 /**
  * 角色卡 voice（附录 A.1）。
  * voice_id 同时用于 StepFun TTS 与 Realtime 分路建连。
- * 官方音色（如 shenchennanyin）和音色复刻返回的 voice id 都填这里；
+ * 官方音色和音色复刻返回的 voice id 都填这里；
  * Realtime 的 voice 只能在建连时锁定，换音色 = 换一条分路，不能对已开的 session.update。
  */
 export interface RoleVoice {
   provider: 'stepfun';
-  /** 官方音色 ID，或 https://platform.stepfun.com/docs/zh/api-reference/audio/create-voice 返回的复刻 voice id */
+  /**
+   * 音色 ID。可以是 StepFun TTS 官方音色、Realtime 系统音色，
+   * 或 https://platform.stepfun.com/docs/zh/api-reference/audio/create-voice 返回的复刻 voice id。
+   * 换克隆音色只改这个字段（或下面的 realtime_voice_id），不用改调用代码。
+   */
   voice_id: string;
-  /** 语速倍率 */
+  /**
+   * Realtime 出声音色。缺省时由 voice_id 解析：
+   * 旧 TTS 音色映射到听感最近的系统音色；未知 ID 视为复刻音色，原样透传。
+   * 显式填写后优先于解析结果（主持与候选人错开、或直接填复刻 ID）。
+   */
+  realtime_voice_id?: string;
+  /** 语速倍率（TTS 降级链路使用；Realtime 会话没有独立语速字段） */
   rate: number;
   emotion_default: string;
 }
+
+/** 结构化单面面试官人数。需求里同时出现过 2 与 3，产品默认 3，两种都支持。 */
+export type PanelSize = 2 | 3;
+export const PANEL_SIZES = [2, 3] as const;
+export const DEFAULT_PANEL_SIZE: PanelSize = 3;
 
 export interface RoleAvatar {
   preset_id: string;
@@ -77,7 +92,7 @@ export interface AvatarPreset {
   tags: string[];
 }
 
-/** 群面阵型：lgd = 1 面试官 + 4 候选人（含我，无领导小组讨论）；panel = 3 面试官 + 1 候选人（我，结构化单面） */
+/** 群面阵型：lgd = 1 主持 + 3 AI 候选人 + 用户；panel = 2 或 3 位面试官 + 用户（结构化单面，默认 3） */
 export type InterviewFormat = 'lgd' | 'panel';
 
 /** 群面阶段（PRD 4.1.3 真实计时四阶段） */

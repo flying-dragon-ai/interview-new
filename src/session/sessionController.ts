@@ -29,6 +29,7 @@ import { guidesToNextKeyPoint, proposesSummary } from '../../engine/discourseSig
 import { VoiceService } from '../../services/voiceService.ts';
 import { RealtimeClient, type RealtimeClientOptions } from '../../services/realtimeClient.ts';
 import type { VoiceLanePool } from '../../services/voiceLanes.ts';
+import { RealtimeVoiceRouter, type VoiceSpeaker } from '../../services/realtimeVoiceRouter.ts';
 import { HOST_CARD, isHostCard } from '../../data/interviewerCards.ts';
 import { saveMessage, saveEvents } from '../api.ts';
 import { VisionClient } from '../vision/visionClient.ts';
@@ -110,6 +111,8 @@ export class SessionController {
   private sessionStartAt = Date.now();
   private voice: VoiceService | null = null;
   private realtime: RealtimeClient | null = null;
+  /** 耳会话 + 按音色去重的嘴会话。耳失败时为 null，整路降级。 */
+  private router: RealtimeVoiceRouter | null = null;
   private realtimeTried = false;
   /** realtime AI 语音播放中的角色（onPlaybackChange 驱动 speakingCharId） */
   private realtimeSpeakingCharId: string | null = null;
@@ -202,8 +205,12 @@ export class SessionController {
     this.playbackTimers.clear();
     this.voice?.dispose();
     this.voice = null;
-    this.realtime?.dispose();
+    const router = this.router;
+    const realtime = this.realtime;
+    this.router = null;
     this.realtime = null;
+    if (router) router.dispose();
+    else realtime?.dispose();
     void this.stopVision();
     this.userStream?.getTracks().forEach((t) => t.stop());
     this.userStream = null;
@@ -336,11 +343,13 @@ export class SessionController {
         }
       }
 
-      // 语音输出：Realtime 全双工（response.audio）优先；不可用时降级 StepFun TTS / 浏览器语音（二选一，禁止双声道齐播）
-      if (this.isRealtimeVoiceActive() && this.realtime) {
+      // 语音输出：该角色的 Realtime 嘴会话优先（每把音色一条连接）；
+      // 这把声音没有嘴会话时降级 StepFun TTS / 浏览器语音（二选一，禁止双声道齐播）
+      const voicedByMouth = this.router?.speak(card.id, content) ?? false;
+      if (voicedByMouth || (!this.router && this.isRealtimeVoiceActive() && this.realtime)) {
         this.realtimeSpeakingCharId = card.id;
         this.store.set({ speakingCharId: card.id });
-        this.realtime.speak(content);
+        if (!voicedByMouth) this.realtime?.speak(content);
         // 播完（或被打断）由 onPlaybackChange(false) 收敛 speakingCharId 并关闭打断窗口；
         // 估算时长兜底，防止 onPlaybackChange 丢失导致高亮悬挂
         const charId = card.id;
@@ -350,6 +359,7 @@ export class SessionController {
             this.realtimeSpeakingCharId = null;
             this.store.set({ speakingCharId: null });
           }
+          this.router?.disarm(charId);
         }, estimateSpeechMs(content) + 1500);
         this.playbackTimers.add(fallbackTimer);
       } else {
@@ -397,7 +407,7 @@ export class SessionController {
       if (!phase.allowSpeech) return;
       if (this.generating.size > 0) return;
       // Realtime AI 语音还在播 → 等播完（或被打断）再调度，避免下一位盖上来
-      if (this.realtime?.isAIPlaying()) {
+      if (this.aiVoicePlaying()) {
         this.scheduled = setTimeout(fire, 800);
         return;
       }
@@ -555,7 +565,7 @@ export class SessionController {
       phase.id === 'FREE_DISCUSSION' &&
       nobodyActive &&
       !this.scheduled &&
-      !this.realtime?.isAIPlaying() &&
+      !this.aiVoicePlaying() &&
       now - Math.max(this.speakEndsAt, this.bargedInAt, this.sessionStartAt) > 20_000 &&
       now - this.lastHostNudgeAt > 30_000
     ) {
@@ -643,7 +653,8 @@ export class SessionController {
   /** dock 打断按钮 / 发送消息共用（原 handleBargeIn） */
   bargeIn(): void {
     this.voice?.bargeIn();
-    // Realtime AI 语音同步停播 + 取消进行中的 response
+    // Realtime：停掉所有嘴会话，并取消耳会话上可能残留的自动回复
+    this.router?.stopAll();
     this.realtime?.stopAISpeech();
     this.realtimeSpeakingCharId = null;
     this.store.set({ speakingCharId: null });
@@ -663,6 +674,7 @@ export class SessionController {
 
     // 1. 停 TTS 播放 + Realtime AI 播报（均满足 300ms 停声）
     this.voice?.bargeIn();
+    this.router?.stopAll();
     this.realtime?.stopAISpeech();
     this.realtimeSpeakingCharId = null;
     this.speakEndsAt = 0; // 播报已停 → 关闭打断评估窗口
@@ -706,44 +718,74 @@ export class SessionController {
    * active：转写直达 sendUserSpeech，VAD 直达 onUserVadStart；fallback：经典 PTT/文字链路不变。
    */
   async initRealtime(): Promise<void> {
-    if (this.realtime || this.realtimeTried || this.finished) return;
+    if (this.router || this.realtime || this.realtimeTried || this.finished) return;
     this.realtimeTried = true;
     this.store.set({ realtimeStatus: 'connecting' });
     try {
       const create = this.deps.createRealtimeClient ?? ((o: RealtimeClientOptions) => RealtimeClient.create(o));
-      const client = await create({
-        events: {
+      const router = await RealtimeVoiceRouter.connect({
+        speakers: this.voiceSpeakers(),
+        createClient: create,
+        onMouthPlayback: (roleId, speaking) => {
+          if (speaking && roleId) {
+            this.realtimeSpeakingCharId = roleId;
+            this.store.set({ speakingCharId: roleId });
+            return;
+          }
+          if (!speaking && (!roleId || this.realtimeSpeakingCharId === roleId)) {
+            this.realtimeSpeakingCharId = null;
+            this.store.set({ speakingCharId: null });
+            this.speakEndsAt = 0;
+          }
+        },
+        earEvents: {
           onVadStart: () => this.onUserVadStart(),
           onVadStop: () => this.onUserVadStop(),
           onUserTranscript: ({ text, isFinal }) => {
             if (isFinal) this.sendUserSpeech(text);
           },
-          onPlaybackChange: (speaking) => {
-            // AI 台词播报开始/结束（Realtime response.audio 链路）
-            if (!speaking && this.realtimeSpeakingCharId) {
-              this.realtimeSpeakingCharId = null;
-              this.store.set({ speakingCharId: null });
-              this.speakEndsAt = 0; // 播报结束 → 关闭打断评估窗口
-            }
-          },
           onError: (e) => console.error('Realtime 错误:', e.code, e.message),
           onClose: () => {
+            const dying = this.router;
+            this.router = null;
             this.realtime = null;
             this.realtimeSpeakingCharId = null;
             this.store.set({ realtimeStatus: 'fallback', userSpeaking: false, speakingCharId: null });
+            dying?.dispose();
           },
         },
       });
-      this.realtime = client;
-      client.setMuted(!this.snap.micOn);
-      client.start();
+      this.router = router;
+      this.realtime = router.ear;
+      router.ear.setMuted(!this.snap.micOn);
+      router.start();
       this.store.set({ realtimeStatus: 'active' });
     } catch (err) {
       // 503 / 网络失败 / 麦克风失败 → 退回按键说话（不白屏，E2E-6）
       console.warn('Realtime 不可用，退回按键说话:', err instanceof Error ? err.message : err);
+      this.router = null;
       this.realtime = null;
       this.store.set({ realtimeStatus: 'fallback' });
     }
+  }
+
+  /** 本场需要出声的角色：无领导含主持，结构化单面只有面试官 */
+  private voiceSpeakers(): VoiceSpeaker[] {
+    const cards = this.format === 'lgd' ? [...this.deps.roles, HOST_CARD] : [...this.deps.roles];
+    const seen = new Set<string>();
+    const speakers: VoiceSpeaker[] = [];
+    for (const card of cards) {
+      if (seen.has(card.id)) continue;
+      seen.add(card.id);
+      speakers.push({ roleId: card.id, voice: card.voice });
+    }
+    return speakers;
+  }
+
+  /** 任一嘴会话仍在播（或台词已提交尚未收到音频） */
+  private aiVoicePlaying(): boolean {
+    if (this.router) return this.router.isAIPlaying();
+    return Boolean(this.realtime?.isAIPlaying());
   }
 
   /** Realtime 是否接管了用户语音输入（接管时 PTT 按钮禁用） */
@@ -758,7 +800,7 @@ export class SessionController {
 
   /** Realtime 播放分析器（口型/灯光律动；回落 VoiceService 侧） */
   getRealtimePlaybackAnalyser(): AnalyserNode | null {
-    return this.realtime?.getPlaybackAnalyser() ?? null;
+    return this.router?.getPlaybackAnalyser() ?? this.realtime?.getPlaybackAnalyser() ?? null;
   }
 
   // ---------- PTT 语音输入（经典模式按键说话，Realtime 不可用时的降级链路） ----------

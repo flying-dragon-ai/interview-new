@@ -110,3 +110,17 @@ server_vad 模式下 `input_audio_buffer.append` 会自动触发大模型推理�
 - [ ] session 空闲多久被服务器关闭（实测后回填）；
 - [ ] `response.cancel` 在无响应时返回的 error 码形态（适配层需吞掉，不当失败上抛）；
 - [ ] StepFun TTS 的 `tts.response.subtitle` 词级时间戳（A7 口型升级项）字段形态，见 `tts` 通道文档。
+
+## 8. 多角色（2026-10）
+
+单条 Realtime 连接只能锁定一把 `voice`，且产出音频后不能再改。多角色不要在一条连接里换音色。
+架构、复刻音色扩展和降级见 [realtime-duplex-design.md](./realtime-duplex-design.md)。
+
+适配层分工：
+
+| 模块 | 职责 |
+|---|---|
+| `services/realtimeClient.ts` | 唯一允许出现 StepFun 事件名的地方。`channel=ear\|mouth\|duplex` |
+| `services/voiceBinding.ts` | `voice_id` / `realtime_voice_id` → `session.update.voice`。未知 ID 当复刻音色透传 |
+| `services/realtimeVoiceRouter.ts` | 1 条耳 + 按音色去重的嘴。不解析事件名 |
+| `server/realtime-proxy.ts` | 每条浏览器 WS 单独持 key 连上游，纯透传 |

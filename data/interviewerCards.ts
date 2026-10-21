@@ -25,7 +25,15 @@ export const HOST_CARD: RoleCard = {
     legacy_id: 'host',
     legacy_name: '主持面试官',
   },
-  voice: { provider: 'stepfun', voice_id: 'linjiajiejie', rate: 0.95, emotion_default: 'neutral' },
+  voice: {
+    provider: 'stepfun',
+    // linjiajiejie 是官方 Realtime 示例音色，不在候选人的 5 个 voice_id 里，
+    // 因此 TTS 降级和分路播报共用这一把，不必再占 wenrounansheng，也不会和深沉男音抢同一条分路。
+    // 换成复刻音色时只改 realtime_voice_id（或直接改 voice_id 为复刻 ID）。
+    voice_id: 'linjiajiejie',
+    rate: 0.95,
+    emotion_default: 'neutral',
+  },
   avatar: { preset_id: 'host_01', emotion_set: ['neutral', 'serious'] },
   behavior: {
     speak_probability: 0.2,
