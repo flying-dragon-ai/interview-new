@@ -183,22 +183,20 @@ test('Q-N1: 匿名练习（无钱包地址）→ wallet_address 落 NULL', async
 });
 
 test('Q-N1: wallet 列缺失（v0.7.1 未迁移）→ 自动回退无钱包列插入', async () => {
-  let calls = 0;
+  // v0.8 链路：含 wallet_address 的插入（v08 / v071(true)）失败两次，第三次（无钱包列）成功
   const { pool, recorded } = mockPool((sql) => {
-    if (/INSERT INTO sessions/i.test(sql)) {
-      calls += 1;
-      if (calls === 1) throw new Error('column "wallet_address" of relation "sessions" does not exist');
-      return { rows: [{ id: 9 }] };
+    if (/INSERT INTO sessions/i.test(sql) && /wallet_address/.test(sql)) {
+      throw new Error('column "wallet_address" of relation "sessions" does not exist');
     }
-    return { rows: [] };
+    return { rows: [{ id: 9 }] };
   });
   setPoolForTesting(pool);
   const res = mockRes();
   await sessionHandler(mockReq(validBody), res);
   assert.equal(res.statusCode, 200);
   const inserts = recorded.filter((r) => /INSERT INTO sessions/i.test(r.sql));
-  assert.equal(inserts.length, 2, '应先尝试含 wallet_address，再回退');
-  assert.ok(!/wallet_address/i.test(inserts[1].sql), '回退插入不应包含 wallet_address 列');
+  assert.equal(inserts.length, 3, '应先尝试含 wallet_address（v08/v071），再回退无钱包列');
+  assert.ok(!/wallet_address/i.test(inserts[2].sql), '回退插入不应包含 wallet_address 列');
 });
 
 test('Q-N1: GET /api/session?wallet_address= 过滤历史（小写归一）', async () => {

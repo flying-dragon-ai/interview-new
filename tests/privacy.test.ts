@@ -88,7 +88,7 @@ test('4.1.9: 同意门控——转写/事件/报告落库均需 consentSaveTrans
 test('C7: 形象合规——全部为风格化虚拟形象（dicebear），无真实姓名/肖像', () => {
   const avatars = read('data/avatars.ts');
   const urls = avatars.match(/asset_url: '([^']+)'/g) ?? [];
-  assert.equal(urls.length, 12);
+  assert.equal(urls.length, 13); // 12 候选人预设 + host_01 主持面试官（阵型 A）
   for (const u of urls) {
     assert.ok(/api\.dicebear\.com/.test(u), `非风格化形象来源: ${u}`);
   }

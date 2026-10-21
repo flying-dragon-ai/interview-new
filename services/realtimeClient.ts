@@ -1,17 +1,23 @@
 /**
- * RealtimeClient —— StepFun Realtime 供应商适配层（M7 P2-2，唯一边界）
+ * RealtimeClient —— StepFun Realtime 供应商适配层（M8：全面切换实时对话，唯一语音通道）
  *
- * 职责（计划 §2.1：用户侧全双工；AI 侧仍走 LLM+TTS 导演机制）：
- * - 服务端 VAD：用户一开口拿到 speech_started → 400ms 确认窗 → onVadStart（≤300ms 内停 AI 播报由上层保证）
- * - 流式转写用户语音（替代按键说话；StepFun 只回最终转写，见 docs/stepfun-realtime-notes.md §3）
- * - 说话人归属天然正确：本通道 = 用户
+ * 职责（全面切换后 = 双向全双工）：
+ * - 用户侧：服务端 VAD（speech_started → 400ms 确认窗 → onVadStart ≤300ms 停 AI 播报）
+ *   + 流式最终转写（conversation.item.input_audio_transcription.completed）
+ * - AI 侧：导演台词注入（speak → conversation.item.create + response.create）
+ *   → 模型语音回复 response.audio.delta（pcm16）→ RealtimePlayback 播放
+ *   → response.audio_transcript.delta/done 字幕（可选消费）
+ * - 模型自由发挥被抑制：speech_started 即 response.cancel（掐掉对用户语音的自动回复），
+ *   台词播报通过 response.create 显式触发
  *
  * 硬约束：
  * - 所有 StepFun 专有事件名只允许出现在本文件（+ docs/stepfun-realtime-notes.md）
- * - 本项目把 Realtime 当「流式 ASR + VAD」用：speech_started 即发 response.cancel，忽略一切 response.* 事件
- * - 麦克风必须开 AEC/NS/AGC（否则 AI 的 TTS 回采导致 VAD 自我触发）
+ * - 麦克风必须开 AEC/NS/AGC（否则 AI 语音回采导致 VAD 自我触发）
  * - 鉴权：浏览器不能设 WS 头 → 同源 /api/realtime 服务端代理（C9 前端 0 key）
  */
+
+import { int16ArrayToBase64 } from './binary.ts';
+import { RealtimePlayback } from './realtimePlayback.ts';
 
 export interface RealtimeEvents {
   /** 用户开口（已过 400ms 确认窗 + 800ms 冷却）→ 触发打断 */
@@ -21,8 +27,13 @@ export interface RealtimeEvents {
   onError(e: { code: string; message: string }): void;
   /** 连接终结且重连耗尽（或 start 失败）→ 上层降级 push-to-talk */
   onClose(): void;
+  /** AI 语音字幕流（response.audio_transcript.delta） */
+  onAssistantTextDelta?(text: string): void;
+  /** AI 语音字幕完结（response.audio_transcript.done） */
+  onAssistantTextDone?(text: string): void;
+  /** AI 播放态变化（开始/排空/被打断）——上层驱动 speakingCharId */
+  onPlaybackChange?(speaking: boolean): void;
 }
-
 export type RealtimeState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
 /** WS 最小接口（浏览器 WebSocket / 测试 mock 共形） */
@@ -50,12 +61,18 @@ export interface RealtimeClientOptions {
   fetchFn?: typeof fetch;
   wsFactory?: (url: string) => WsLike;
   micFactory?: (onFrame: (pcm16Base64: string) => void) => Promise<MicHandle>;
+  /** AI 台词播报指令（session.update instructions；缺省为逐字播报指令） */
+  instructions?: string;
+  /** 播放器工厂（测试注入；默认 RealtimePlayback） */
+  playbackFactory?: () => RealtimePlayback;
   /** VAD 起点后的确认窗（咳嗽/键盘过滤），默认 400ms */
   confirmWindowMs?: number;
   /** 打断后的冷却窗（防 AI 尾音回采连锁触发），默认 800ms */
   cooldownMs?: number;
   /** 重连退避序列，默认 [500,1000,2000]（0.5s→1s→2s，最多 3 次，上限对齐 4s 语义） */
   reconnectDelaysMs?: number[];
+  /** 初始建连失败后的快速重试延迟，默认 400ms（生产无 WS 端点时 ≤1s 降级，不拖常规退避） */
+  initialRetryMs?: number;
   now?: () => number;
 }
 
@@ -70,6 +87,15 @@ export class RealtimeUnavailableError extends Error {
 }
 
 /** 上行音频采样率：文档未标注（见 notes §7 开放问题），按 StepFun 实时 ASR 惯例 16kHz pcm16；实测不符只改这里 */
+/**
+ * 台词播报默认指令（session.update instructions）：
+ * 告知模型自身是「面试室语音通道」，日常用户语音输入不回话（response.cancel 兜底），
+ * 仅在收到【台词播报】指令时逐字读出台词。
+ */
+export const DEFAULT_BROADCAST_INSTRUCTIONS =
+  '你是面试室的语音播报通道。用户说话时你不要自行回答或展开（系统会取消你的回复）。' +
+  '只有当收到以【台词播报】开头的用户消息时，把其中的台词用自然、清晰的口语逐字读出，保持原语言与原语气，一字不差。';
+
 export const REALTIME_INPUT_SAMPLE_RATE = 16000;
 
 interface ResolvedOptions extends RealtimeClientOptions {
@@ -104,10 +130,13 @@ export class RealtimeClient {
   private readonly events: RealtimeEvents;
   private ws: WsLike | null = null;
   private mic: MicHandle | null = null;
+  private readonly playback: RealtimePlayback;
   private muted = false;
   private disposed = false;
   private intentionalClose = false;
   private reconnectAttempt = 0;
+  /** 至少成功建连一次（决定 close 后走常规退避还是快速降级） */
+  private everOpened = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private vadConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private lastBargeAt = -Infinity;
@@ -115,11 +144,13 @@ export class RealtimeClient {
 
   private constructor(opts: RealtimeClientOptions & { url: string; model: string }) {
     this.events = opts.events;
+    this.playback = (opts.playbackFactory ?? (() => new RealtimePlayback()))();
     this.opts = {
       ...opts,
       confirmWindowMs: opts.confirmWindowMs ?? 400,
       cooldownMs: opts.cooldownMs ?? 800,
       reconnectDelaysMs: opts.reconnectDelaysMs ?? [500, 1000, 2000],
+      initialRetryMs: opts.initialRetryMs ?? 400,
       now: opts.now ?? Date.now,
     };
   }
@@ -144,6 +175,7 @@ export class RealtimeClient {
       this.reconnectTimer = null;
     }
     this.stopMic();
+    this.playback.stop();
     if (this.ws) {
       try {
         this.ws.close();
@@ -159,11 +191,51 @@ export class RealtimeClient {
     this.disposed = true;
     this.stop();
     this._state = 'closed';
+    this.playback.dispose();
   }
-
   /** 静音：停止上行帧（采集保持，避免重复 getUserMedia 权限弹窗） */
   setMuted(muted: boolean): void {
     this.muted = muted;
+  }
+
+  // ==================== AI 台词播报（全面切换实时对话 M8） ====================
+
+  /**
+   * 导演台词注入：conversation.item.create（user 文本，含逐字播报指令）→ response.create。
+   * 模型以语音回复（response.audio.delta），本类直接入队播放；字幕经 onAssistantTextDelta/Done 上抛。
+   * 非连接态静默丢弃（上层经 state 判断，降级链路接管）。
+   */
+  speak(text: string): void {
+    const line = text.trim();
+    if (!line) return;
+    this.sendJson({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `【台词播报】请用自然口语逐字读出下面这段台词，一字不差，不要添加、解释或改写任何内容：\n${line}` }],
+      },
+    });
+    this.sendJson({ type: 'response.create' });
+  }
+
+  /** AI 是否正在播报（播放队列未排空） */
+  isAIPlaying(): boolean {
+    return this.playback.playing;
+  }
+
+  /** 手动停止 AI 播报（dock 打断按钮 / 文字消息 barge-in 复用） */
+  stopAISpeech(): void {
+    this.sendJson({ type: 'response.cancel' });
+    if (this.playback.playing) {
+      this.playback.stop();
+      this.events.onPlaybackChange?.(false);
+    }
+  }
+
+  /** 播放分析器（口型/灯光律动；无播放器/无 AudioContext 时回落 VoiceService 侧） */
+  getPlaybackAnalyser(): AnalyserNode | null {
+    return this.playback.getPlaybackAnalyser();
   }
 
   // ==================== 内部 ====================
@@ -174,12 +246,14 @@ export class RealtimeClient {
     this.ws = ws;
 
     ws.onopen = () => {
+      this.everOpened = true;
       this.reconnectAttempt = 0;
-      // 会话配置：开启服务端 VAD；不设 instructions（模型自动回复会被 response.cancel 掐掉并忽略）
+      // 会话配置：开启服务端 VAD + 台词播报指令（AI 语音走 response.audio，模型自由发挥被 response.cancel 抑制）
       this.sendJson({
         type: 'session.update',
         session: {
           modalities: ['text', 'audio'],
+          instructions: this.opts.instructions ?? DEFAULT_BROADCAST_INSTRUCTIONS,
           ...(this.opts.voice ? { voice: this.opts.voice } : {}),
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
@@ -202,6 +276,21 @@ export class RealtimeClient {
       this.clearVadConfirm();
       if (this.intentionalClose || this.disposed) {
         this._state = 'closed';
+        return;
+      }
+      // 从未成功建连（生产无 WS 端点/断网）：快速重试一次后直接降级，不走 3.5s 常规退避
+      if (!this.everOpened) {
+        if (this.reconnectAttempt === 0) {
+          this.reconnectAttempt = this.opts.reconnectDelaysMs.length; // 不再进入常规退避
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            if (!this.disposed && !this.intentionalClose) this.connect();
+          }, this.opts.initialRetryMs);
+          return;
+        }
+        this._state = 'error';
+        this.events.onError({ code: 'REALTIME_RECONNECT_FAILED', message: 'Realtime 初始建连不可达' });
+        this.events.onClose();
         return;
       }
       // 非主动断线：指数退避重连，耗尽即降级
@@ -243,6 +332,24 @@ export class RealtimeClient {
           this.events.onUserTranscript({ text: msg.transcript, isFinal: true });
         }
         break;
+      case 'response.audio.delta':
+        if (typeof (msg as { delta?: unknown }).delta === 'string' && (msg as { delta: string }).delta) {
+          this.playback.enqueue((msg as { delta: string }).delta);
+          this.events.onPlaybackChange?.(true);
+        }
+        break;
+      case 'response.audio_transcript.delta':
+        if (typeof (msg as { delta?: unknown }).delta === 'string' && (msg as { delta: string }).delta) {
+          this.events.onAssistantTextDelta?.((msg as { delta: string }).delta);
+        }
+        break;
+      case 'response.audio_transcript.done':
+        this.events.onAssistantTextDone?.(String((msg as { text?: unknown }).text ?? ''));
+        break;
+      case 'response.done':
+        // 一次台词播报结束（音频排空由 playback.onended 兜底，这里同步收敛播放态）
+        if (!this.playback.playing) this.events.onPlaybackChange?.(false);
+        break;
       case 'error': {
         const code = msg.error?.type ?? 'REALTIME_ERROR';
         // response.cancel 在无响应时返回的错误属正常噪音，吞掉
@@ -261,8 +368,12 @@ export class RealtimeClient {
     const now = this.opts.now();
     if (now - this.lastBargeAt < this.opts.cooldownMs) return;
     if (this.vadConfirmTimer) return; // 已在确认窗内
-    // 掐掉模型可能的自动回复（本项目只把 Realtime 当 ASR+VAD 用）
+    // 掐掉模型对用户语音的自动回复（AI 台词经显式 response.create 触发）
     this.sendJson({ type: 'response.cancel' });
+    if (this.playback.playing) {
+      this.playback.stop();
+      this.events.onPlaybackChange?.(false);
+    }
     this.vadConfirmTimer = setTimeout(() => {
       this.vadConfirmTimer = null;
       this.lastBargeAt = this.opts.now();
@@ -343,18 +454,45 @@ async function defaultMicFactory(onFrame: (pcm16Base64: string) => void): Promis
   const ctx = new AudioContext();
   if (ctx.state === 'suspended') await ctx.resume();
   const source = ctx.createMediaStreamSource(stream);
-  const processor = ctx.createScriptProcessor(2048, 1, 1);
-  processor.onaudioprocess = (e) => {
-    const input = e.inputBuffer.getChannelData(0);
+  const emit = (input: Float32Array) => {
     const pcm16 = downsampleToPcm16(input, ctx.sampleRate, REALTIME_INPUT_SAMPLE_RATE);
-    onFrame(pcm16ToBase64(pcm16));
+    onFrame(int16ArrayToBase64(pcm16));
   };
-  source.connect(processor);
-  processor.connect(ctx.destination);
+
+  // AudioWorklet 优先（采集/聚合在音频线程，不与 250ms tick + 视觉帧泵抢主线程）；
+  // iOS Safari / 旧环境回退 ScriptProcessor
+  let worklet: AudioWorkletNode | null = null;
+  try {
+    const blob = new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    worklet = new AudioWorkletNode(ctx, 'mic-tap');
+    worklet.port.onmessage = (e: MessageEvent<Float32Array>) => emit(e.data);
+    source.connect(worklet); // 不连 destination：免回采
+  } catch {
+    worklet = null;
+  }
+
+  let processor: ScriptProcessorNode | null = null;
+  if (!worklet) {
+    processor = ctx.createScriptProcessor(2048, 1, 1);
+    processor.onaudioprocess = (e) => emit(e.inputBuffer.getChannelData(0));
+    source.connect(processor);
+    processor.connect(ctx.destination); // ScriptProcessor 必须入图才回调（AEC 抑制回采）
+  }
+
   return {
     stop() {
       try {
-        processor.disconnect();
+        if (worklet) {
+          worklet.port.onmessage = null;
+          worklet.disconnect();
+        }
+        if (processor) {
+          processor.onaudioprocess = null;
+          processor.disconnect();
+        }
         source.disconnect();
       } catch {
         // 忽略
@@ -364,6 +502,26 @@ async function defaultMicFactory(onFrame: (pcm16Base64: string) => void): Promis
     },
   };
 }
+
+/** AudioWorklet 源码（Blob 注入；2048 样本聚合一帧再 postMessage，降消息频率） */
+const MIC_WORKLET_SOURCE = `
+class MicTapProcessor extends AudioWorkletProcessor {
+  constructor() { super(); this._buf = new Float32Array(2048); this._n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    let i = 0;
+    while (i < ch.length) {
+      const take = Math.min(ch.length - i, this._buf.length - this._n);
+      this._buf.set(ch.subarray(i, i + take), this._n);
+      this._n += take; i += take;
+      if (this._n === this._buf.length) { this.port.postMessage(this._buf.slice(0)); this._n = 0; }
+    }
+    return true;
+  }
+}
+registerProcessor('mic-tap', MicTapProcessor);
+`;
 
 /** 线性插值降采样 → Int16（单声道） */
 function downsampleToPcm16(input: Float32Array, fromRate: number, toRate: number): Int16Array {
@@ -391,12 +549,3 @@ function floatTo16(v: number): number {
   return clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
 }
 
-function pcm16ToBase64(pcm: Int16Array): string {
-  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}

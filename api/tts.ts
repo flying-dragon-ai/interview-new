@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.ts';
-import { createSseWriter } from './_lib/sse.ts';
+import { createSseWriter, pipeUpstreamSse } from './_lib/sse.ts';
+import { getClientIp } from './_lib/http.ts';
 import { checkRateLimit } from './_lib/ratelimit.ts';
 
 /**
@@ -12,12 +13,6 @@ import { checkRateLimit } from './_lib/ratelimit.ts';
 
 const STEP_TTS_URL = 'https://api.stepfun.com/v1/audio/speech';
 
-function getClientIp(req: VercelRequest): string | undefined {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string') return fwd.split(',')[0].trim();
-  if (Array.isArray(fwd)) return fwd[0];
-  return req.socket?.remoteAddress;
-}
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') {
@@ -85,38 +80,24 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   // SSE 透传：上游 speech.audio.delta/done/error → 客户端 delta/done/error
   const sse = createSseWriter(response);
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const payload = line.slice(6).trim();
-        if (payload === '[DONE]') continue;
-        try {
-          const data = JSON.parse(payload) as { type?: string; audio?: string; message?: string };
-          if (data.type === 'speech.audio.delta' && typeof data.audio === 'string' && data.audio) {
-            sse.send('delta', { audio: data.audio });
-          } else if (data.type === 'speech.audio.done') {
-            sse.send('done', {});
-          } else if (data.type === 'speech.audio.error') {
-            sse.send('error', { message: data.message ?? 'TTS 上游错误' });
-          }
-        } catch {
-          // 忽略单条解析失败
+    await pipeUpstreamSse(upstream.body, (payload) => {
+      try {
+        const data = JSON.parse(payload) as { type?: string; audio?: string; message?: string };
+        if (data.type === 'speech.audio.delta' && typeof data.audio === 'string' && data.audio) {
+          sse.send('delta', { audio: data.audio });
+        } else if (data.type === 'speech.audio.done') {
+          sse.send('done', {});
+        } else if (data.type === 'speech.audio.error') {
+          sse.send('error', { message: data.message ?? 'TTS 上游错误' });
         }
+      } catch {
+        // 忽略单条解析失败
       }
-    }
+    });
   } catch (err) {
     sse.send('error', { message: err instanceof Error ? err.message : String(err) });
   } finally {
-    reader.releaseLock();
     sse.close();
   }
 }

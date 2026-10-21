@@ -84,6 +84,27 @@ export function validateSelection(cards: RoleCard[]): SelectionViolation[] {
 }
 
 /**
+ * 阵型 B（3 面试官 + 1 候选人）：面试官组合校验。
+ * 与候选人约束的差异：不要求性格互补（面试官按分工互补即可），保留音色/形象/策略不重复。
+ */
+export function validatePanelSelection(cards: RoleCard[]): SelectionViolation[] {
+  const violations: SelectionViolation[] = [];
+  if (cards.length !== 3) {
+    violations.push({ rule: 'count', message: '每场必须选择 3 个面试官' });
+    return violations;
+  }
+  const voices = cards.map((c) => c.voice.voice_id);
+  if (new Set(voices).size !== voices.length) {
+    violations.push({ rule: 'voice_unique', message: '3 个面试官音色不能重复' });
+  }
+  const avatars = cards.map((c) => c.avatar.preset_id);
+  if (new Set(avatars).size !== avatars.length) {
+    violations.push({ rule: 'avatar_unique', message: '3 个面试官形象不能重复' });
+  }
+  return violations;
+}
+
+/**
  * 自动分配 3 张卡。
  * @param industry 用户岗位推断行业（优先匹配）
  * @param seed 随机种子（同种子结果可复现）

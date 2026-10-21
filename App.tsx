@@ -3,11 +3,10 @@ import SetupForm from './components/SetupForm';
 import DeviceCheck, { type DeviceCheckResult } from './components/DeviceCheck';
 import VoiceRoom from './components/VoiceRoom';
 import EvidenceReport from './components/EvidenceReport';
-import FeedbackReport from './components/FeedbackReport';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import WalletButton from './components/WalletButton';
 import { useWalletIdentity } from './src/wallet/context';
-import { SimulationState, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
+import { SimulationState, InterviewFormat, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
 import { generateReportV15, generateFeedback } from './services/geminiService';
 import {
   createSession,
@@ -28,10 +27,7 @@ const App: React.FC = () => {
     topic: '',
     jobTitle: '',
     company: '',
-    messages: [],
     status: 'IDLE',
-    activeCharacterId: null,
-    round: 0,
   });
   const [roles, setRoles] = useState<RoleCard[]>([]);
   const [topicType, setTopicType] = useState('business_case');
@@ -42,7 +38,6 @@ const App: React.FC = () => {
   const [dbAvailable, setDbAvailable] = useState(true);
 
   const [report, setReport] = useState<ReportV15 | null>(null);
-  const [legacyFeedback, setLegacyFeedback] = useState<FeedbackData | null>(null);
   const [finishedMessages, setFinishedMessages] = useState<Message[]>([]);
   const [finishedEvents, setFinishedEvents] = useState<GameEvent[]>([]);
   const [sessionStartAt, setSessionStartAt] = useState(0);
@@ -61,12 +56,20 @@ const App: React.FC = () => {
   const wallet = useWalletIdentity();
 
   // ---- 准备页 → 设备检测 ----
-  const startPreparation = (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[] }) => {
+  const startPreparation = (params: {
+    topic: string;
+    jobTitle: string;
+    company: string;
+    topicType: string;
+    format: InterviewFormat;
+    roles: RoleCard[];
+  }) => {
     setState((prev) => ({
       ...prev,
       topic: params.topic,
       jobTitle: params.jobTitle,
       company: params.company,
+      format: params.format,
       status: 'PREPARING',
     }));
     setRoles(params.roles);
@@ -85,6 +88,7 @@ const App: React.FC = () => {
       jobTitle: state.jobTitle,
       topic: state.topic,
       topicType,
+      format: state.format,
       roles: roles.map((r) => r.id),
       voiceEnabled: result.voiceEnabled,
       cameraEnabled: result.cameraEnabled,
@@ -101,8 +105,13 @@ const App: React.FC = () => {
   };
 
   // ---- 群面结束 → 面后分析 → 报告 v1.5 ----
-  const finishSimulation = async (history: Message[], events: GameEvent[], startedAt: number) => {
-    setState((prev) => ({ ...prev, status: 'FINISHED', messages: history }));
+  const finishSimulation = async (
+    history: Message[],
+    events: GameEvent[],
+    startedAt: number,
+    visualRows: import('./types').VisualFeatureRow[] = []
+  ) => {
+    setState((prev) => ({ ...prev, status: 'FINISHED' }));
     setFinishedMessages(history);
     setFinishedEvents(events);
     setSessionStartAt(startedAt);
@@ -111,50 +120,33 @@ const App: React.FC = () => {
 
     const durationMs = Date.now() - startedAt;
 
-    // 并行：服务端分析（有会话时）+ 旧 4 字段报告（冗余展示）
-    const tasks: Promise<unknown>[] = [];
-
-    tasks.push(
-      (async () => {
-        try {
-          let reportV15: ReportV15 | null = null;
-          if (sessionId && consent) {
-            reportV15 = await triggerAnalyze(sessionId);
-          }
-          if (!reportV15) {
-            reportV15 = await generateReportV15({
-              topic: state.topic,
-              jobTitle: state.jobTitle,
-              messages: history,
-              events,
-              sessionStartAt: startedAt,
-              durationMs,
-              sessionId,
-            });
-          }
-          setReport(reportV15);
-          if (sessionId && consent) {
-            saveReport({ sessionId, report: reportV15 });
-          }
-        } catch (e) {
-          console.error('报告 v1.5 生成失败:', e);
-          setFeedbackError(true);
+    try {
+      let reportV15: ReportV15 | null = null;
+      if (sessionId && consent) {
+        // 服务端分析：读 DB transcripts/events/visual_features → 规则引擎 + LLM → 已落库
+        reportV15 = await triggerAnalyze(sessionId);
+      }
+      if (!reportV15) {
+        // 客户端兜底（本地模式 / 服务端异常）：用会话内存数据生成，需手动落库
+        reportV15 = await generateReportV15({
+          topic: state.topic,
+          jobTitle: state.jobTitle,
+          messages: history,
+          events,
+          sessionStartAt: startedAt,
+          durationMs,
+          visualRows,
+          sessionId,
+        });
+        if (sessionId && consent) {
+          saveReport({ sessionId, report: reportV15 });
         }
-      })()
-    );
-
-    tasks.push(
-      (async () => {
-        try {
-          const legacy = await generateFeedback(state.topic, state.jobTitle, history);
-          setLegacyFeedback(legacy);
-        } catch {
-          // 旧字段报告失败不阻断 v1.5
-        }
-      })()
-    );
-
-    await Promise.all(tasks);
+      }
+      setReport(reportV15);
+    } catch (e) {
+      console.error('报告 v1.5 生成失败:', e);
+      setFeedbackError(true);
+    }
 
     // 更新会话状态
     if (sessionId) {
@@ -162,6 +154,9 @@ const App: React.FC = () => {
     }
     setIsLoadingFeedback(false);
   };
+
+  /** 旧 4 字段报告（冗余展示）：EvidenceReport 内按需懒加载，不再随收尾无条件消耗一次 LLM 调用 */
+  const loadLegacyFeedback = () => generateFeedback(state.topic, state.jobTitle, finishedMessages);
 
   const handleDeleteRecords = async (id: number): Promise<boolean> => {
     return deleteSession(id);
@@ -172,15 +167,11 @@ const App: React.FC = () => {
       topic: '',
       jobTitle: '',
       company: '',
-      messages: [],
       status: 'IDLE',
-      activeCharacterId: null,
-      round: 0,
     });
     setRoles([]);
     setSessionId(null);
     setReport(null);
-    setLegacyFeedback(null);
     setFinishedMessages([]);
     setFinishedEvents([]);
   };
@@ -247,6 +238,7 @@ const App: React.FC = () => {
             <VoiceRoom
               state={state}
               roles={roles}
+              format={state.format}
               sessionId={sessionId}
               consentSaveTranscript={consent}
               cameraEnabled={cameraEnabled}
@@ -273,7 +265,7 @@ const App: React.FC = () => {
             ) : report ? (
               <EvidenceReport
                 report={report}
-                legacy={legacyFeedback}
+                loadLegacy={feedbackError ? undefined : loadLegacyFeedback}
                 messages={finishedMessages}
                 events={finishedEvents}
                 sessionStartAt={sessionStartAt}
@@ -281,15 +273,6 @@ const App: React.FC = () => {
                 onRestart={restart}
                 onDeleteRecords={handleDeleteRecords}
               />
-            ) : legacyFeedback ? (
-              <div className="space-y-4">
-                {feedbackError && (
-                  <div className="max-w-3xl mx-auto text-center text-xs badge-warning rounded-xl px-4 py-2">
-                    ⚠️ v1.5 证据化报告生成失败（LLM 异常），已降级展示经典四维评价
-                  </div>
-                )}
-                <FeedbackReport feedback={legacyFeedback} onRestart={restart} />
-              </div>
             ) : (
               <div className="text-center p-8 glass-panel">
                 <h2 className="text-2xl font-bold text-red-300 mb-4">反馈生成失败</h2>

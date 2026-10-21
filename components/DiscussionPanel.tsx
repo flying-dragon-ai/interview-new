@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import type { GameEvent, Message, RoleCard, SimulationState } from '../types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import type { GameEvent, InterviewFormat, Message, RoleCard, SimulationState } from '../types';
 import { currentPhase } from '../engine/phaseEngine';
 import { useSession } from '../src/session/useSession';
+import { HOST_CARD } from '../data/interviewerCards';
 import AvatarStage from './AvatarStage';
 import ClassicPhaseHeader from './classic/ClassicPhaseHeader';
 import ClassicAside from './classic/ClassicAside';
@@ -16,23 +17,25 @@ import MessageBubble from './classic/MessageBubble';
 interface DiscussionPanelProps {
   state: SimulationState;
   roles: RoleCard[];
+  format?: InterviewFormat;
   sessionId: number | null;
   consentSaveTranscript: boolean;
   cameraEnabled: boolean;
   facingMode: 'user' | 'environment';
-  onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number) => void;
+  onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number, visualRows?: import('../types').VisualFeatureRow[]) => void;
 }
 
 const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   state,
   roles,
+  format = 'lgd' as InterviewFormat,
   sessionId,
   consentSaveTranscript,
   cameraEnabled,
   facingMode,
   onFinish,
 }) => {
-  const { controller, snapshot } = useSession({ state, roles, sessionId, consentSaveTranscript, cameraEnabled, facingMode, onFinish });
+  const { controller, snapshot } = useSession({ state, roles, format, sessionId, consentSaveTranscript, cameraEnabled, facingMode, onFinish });
   const {
     messages,
     phase: phaseState,
@@ -48,7 +51,9 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   } = snapshot;
   const voiceCaps = snapshot.caps;
   const realtimeActive = snapshot.realtimeStatus === 'active';
-
+  /** 展示用角色列表：lgd 阵型额外展示主持面试官（不参与发言权调度，仅展示/气泡头像） */
+  // 展示用角色列表（memo：避免 nowTs/流式文本重渲染破坏 MessageBubble memo）
+  const displayCards = useMemo(() => (format === 'panel' ? roles : [...roles, HOST_CARD]), [format, roles]);
   // 纯 UI 本地态（不进 SessionStore：文字草稿/PTT 录音指示/移动端折叠）
   const [inputValue, setInputValue] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -105,9 +110,8 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       <div className="flex-1 flex flex-col min-w-0">
         <ClassicPhaseHeader
           phaseState={phaseState}
-          nowTs={snapshot.nowTs}
           phaseConfig={controller.phaseConfig}
-          roles={roles}
+          roles={displayCards}
           degraded={degraded}
           topicOpen={topicOpen}
           onToggleTopic={() => setTopicOpen((v) => !v)}
@@ -126,7 +130,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         {/* 形象台（移动端横向滑动；桌面见右侧栏） */}
         <div className="md:hidden px-3 pt-3">
           <AvatarStage
-            cards={roles}
+            cards={displayCards}
             activeCardId={activeCharId}
             speakingCardId={speakingCharId}
             cameraEnabled={cameraOn}
@@ -142,12 +146,16 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             <div className="text-center py-10">
               <div className="text-4xl mb-3">📖</div>
               <div className="text-lg font-bold text-white">审题阶段</div>
-              <p className="text-sm text-white/50 mt-1">请阅读题目，倒计时结束后进入个人陈述（每人 1 分钟）</p>
+              <p className="text-sm text-white/50 mt-1">
+                {format === 'panel'
+                  ? '面试即将开始，倒计时结束后请先做自我介绍'
+                  : '请阅读题目，倒计时结束后进入个人陈述（每人 1 分钟）'}
+              </p>
             </div>
           )}
 
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} roles={roles} />
+            <MessageBubble key={msg.id} msg={msg} roles={displayCards} />
           ))}
 
           {isGenerating && streamingText && (
@@ -310,7 +318,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       <ClassicAside
         topic={state.topic}
         currentKeyPoint={currentKeyPoint}
-        roles={roles}
+        roles={displayCards}
         speakingCharId={speakingCharId}
         activeCharId={activeCharId}
         awaitingUser={awaitingUser}

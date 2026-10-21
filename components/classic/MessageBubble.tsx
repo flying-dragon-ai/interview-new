@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import type { Message, RoleCard } from '../../types';
 import { findAvatarPreset } from '../../data/avatars.ts';
 
@@ -9,7 +9,8 @@ interface Props {
   roles: RoleCard[];
 }
 
-const MessageBubble: React.FC<Props> = ({ msg, roles }) => {
+/** memo：快照 4Hz 更新（阶段/流式文本）不再逐气泡重渲；roles 引用由 DiscussionPanel memo 保证稳定 */
+const MessageBubble = memo(function MessageBubble({ msg, roles }: Props) {
   const isUser = msg.senderId === 'user';
   const card = roles.find((c) => c.id === msg.senderId);
   const preset = card ? findAvatarPreset(card.avatar.preset_id) : undefined;
@@ -47,6 +48,6 @@ const MessageBubble: React.FC<Props> = ({ msg, roles }) => {
       </div>
     </div>
   );
-};
+});
 
 export default MessageBubble;

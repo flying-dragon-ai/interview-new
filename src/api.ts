@@ -54,6 +54,8 @@ export async function createSession(params: {
   topic: string;
   topicType?: string;
   roles?: string[];
+  /** 群面阵型：lgd（默认）| panel */
+  format?: string;
   voiceEnabled?: boolean;
   cameraEnabled?: boolean;
   userId?: number | null;
@@ -70,6 +72,7 @@ export async function createSession(params: {
         topic: params.topic,
         topic_type: params.topicType ?? 'business_case',
         roles: params.roles ?? [],
+        format: params.format ?? 'lgd',
         voice_enabled: params.voiceEnabled ?? false,
         camera_enabled: params.cameraEnabled ?? false,
         user_id: params.userId ?? null,

@@ -33,7 +33,7 @@ test('TC-05: AI 发言超时被打断后由调度器立即安排发言（interru
   assert.ok(/registerInterrupt\(this\.turn, interrupt\.targetId, interrupt\.interrupterId\)/.test(controller), '打断未登记（罚分/加成）');
   assert.ok(/event_type: 'interrupt'/.test(controller), '打断事件未记录');
   // 用户被点名 5 秒未回应 → 其他 AI 接话
-  assert.ok(/evaluateUserCalledNoResponse\(this\.deps\.roles, this\.turn, now\)/.test(controller), '未实现点名未响应接话');
+  assert.ok(/evaluateUserCalledNoResponse\(this\.deps\.roles, this\.turn, now[,\)]/.test(controller), '未实现点名未响应接话');
 });
 test('TC-10: 异常降级提示与语音模式展示（经典 UI）', () => {
   const classic = readClassicUi();

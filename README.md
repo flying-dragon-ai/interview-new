@@ -75,7 +75,7 @@ psql "$DATABASE_URL" -f db/migration-v0.7.sql
 
 ```bash
 pnpm check:secrets   # D1/D2 源码回归：无硬编码 key/凭据
-pnpm test            # 109 个 node:test 用例（含 API/语音/隐私/接线集成测试）：阶段引擎/调度/角色分配/报告引擎/代理集成
+pnpm test            # 200 个 node:test 用例（含 API/语音/隐私/接线集成测试）：阶段引擎/调度/角色分配/报告引擎/代理集成
 pnpm check:bundle    # TC-00：构建产物无任何 key/凭据
 ```
 

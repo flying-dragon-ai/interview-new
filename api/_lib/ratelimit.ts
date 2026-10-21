@@ -70,9 +70,21 @@ export function checkRateLimit(ip: string | undefined, sessionId?: string | numb
     s.count += 1;
   }
 
-  // 简单清理，防内存膨胀
-  if (ipBuckets.size > 5000) ipBuckets.clear();
+  // 定向淘汰过期桶（不做全量 clear——那会重置所有攻击者的窗口，反而利好攻击）
+  evictExpired(ipBuckets, now, 5000);
+  evictExpired(sessionCounts, now, 5000);
   return { allowed: true };
+}
+
+/** 超过 max 时淘汰已过期条目；仍超额则按 resetAt 淘汰最旧的（防内存膨胀） */
+function evictExpired(map: Map<string, { count: number; resetAt: number }>, now: number, max: number): void {
+  if (map.size <= max) return;
+  for (const [k, v] of map) {
+    if (v.resetAt <= now) map.delete(k);
+  }
+  if (map.size <= max) return;
+  const entries = [...map.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
+  for (let i = 0; i < map.size - max; i++) map.delete(entries[i][0]);
 }
 
 export function getRateLimitConfig() {

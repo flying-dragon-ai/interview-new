@@ -67,13 +67,12 @@ export interface AvatarPreset {
   asset_url: string;
   viseme_asset_url?: string | null;
   emotion_asset_url?: string | null;
-  /** M7 P3-4：VRM 数字人资源路径；null/缺省 = 回落 DiceBear SVG 平面贴片（老角色卡不炸） */
-  vrm_url?: string | null;
-  /** M7 D3：口型权重曲线 */
-  viseme_profile?: 'default' | 'wide' | 'subtle';
   default_voice_id: string;
   tags: string[];
 }
+
+/** 群面阵型：lgd = 1 面试官 + 4 候选人（含我，无领导小组讨论）；panel = 3 面试官 + 1 候选人（我，结构化单面） */
+export type InterviewFormat = 'lgd' | 'panel';
 
 /** 群面阶段（PRD 4.1.3 真实计时四阶段） */
 export type PhaseId = 'READING' | 'OPENING' | 'FREE_DISCUSSION' | 'SUMMARY';
@@ -233,8 +232,7 @@ export interface SimulationState {
   topic: string;
   jobTitle: string;
   company: string;
-  messages: Message[];
   status: 'IDLE' | 'PREPARING' | 'DISCUSSING' | 'FINISHED';
-  activeCharacterId: string | null;
-  round: number;
+  /** 群面阵型（缺省 lgd，向后兼容旧数据） */
+  format?: InterviewFormat;
 }

@@ -2,13 +2,12 @@ import React, { useState } from 'react';
 import { generateTopicStream } from '../services/geminiService';
 import { ROLE_CARDS, inferIndustry, cardDisplayRole } from '../data/roleCards';
 import { findAvatarPreset } from '../data/avatars';
-import { autoSelectRoles, validateSelection, resolveRoleCards } from '../engine/roleSelector';
+import { autoSelectRoles, validatePanelSelection, validateSelection, resolveRoleCards } from '../engine/roleSelector';
 import { TOPIC_TYPES } from '../constants';
-import type { RoleCard } from '../types';
-
+import type { InterviewFormat, RoleCard } from '../types';
 /**
  * 准备页（PRD 4.1.2 / 5.2）
- * 公司/岗位 → 题型 → 形象（12 角色卡抽 3）→ 生成题目 → 设备检测 → 房间。
+ * 公司/岗位 → 阵型 → 题型 → 形象（12 角色卡抽 3）→ 生成题目 → 设备检测 → 房间。
  */
 
 interface SetupFormProps {
@@ -17,6 +16,7 @@ interface SetupFormProps {
     jobTitle: string;
     company: string;
     topicType: string;
+    format: InterviewFormat;
     roles: RoleCard[];
   }) => void;
 }
@@ -32,11 +32,13 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   const [jobTitle, setJobTitle] = useState('');
   const [company, setCompany] = useState('');
   const [topicType, setTopicType] = useState<string>('business_case');
+  /** 群面阵型：lgd = 1 面试官 + 4 候选人（含我）；panel = 3 面试官 + 1 候选人（我） */
+  const [format, setFormat] = useState<InterviewFormat>('lgd');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const selectedCards = resolveRoleCards(selectedIds);
-  const violations = validateSelection(selectedCards);
+  const violations = format === 'panel' ? validatePanelSelection(selectedCards) : validateSelection(selectedCards);
 
   const toggleCard = (id: string) => {
     setSelectedIds((prev) => {
@@ -74,14 +76,14 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
     e.preventDefault();
     if (!topic || !jobTitle || !company) return;
     if (selectedCards.length !== 3) {
-      alert('请选择 3 个面试官角色（或点击随机分配）');
+      alert(format === 'panel' ? '请选择 3 个面试官角色（或点击随机分配）' : '请选择 3 个候选人角色（或点击随机分配）');
       return;
     }
     if (violations.length > 0) {
       alert(`角色组合不满足约束：${violations.map((v) => v.message).join('；')}`);
       return;
     }
-    onStart({ topic, jobTitle, company, topicType, roles: selectedCards });
+    onStart({ topic, jobTitle, company, topicType, format, roles: selectedCards });
   };
 
   return (
@@ -138,11 +140,38 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           </select>
         </div>
 
+        {/* 群面阵型：两种可选 */}
+        <div>
+          <label className="block text-sm font-semibold text-white/60 mb-2">群面阵型</label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setFormat('lgd')}
+              className={`glass-card p-4 text-left ${format === 'lgd' ? 'glass-selected' : ''}`}
+            >
+              <div className="text-sm font-bold text-white">1 面试官 + 4 候选人（含我）</div>
+              <div className="text-[11px] text-white/50 mt-1 leading-relaxed">
+                无领导小组讨论：3 位 AI 候选人与你同场竞技，1 位主持面试官控场（审题 → 个人陈述 → 自由讨论 → 总结）
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormat('panel')}
+              className={`glass-card p-4 text-left ${format === 'panel' ? 'glass-selected' : ''}`}
+            >
+              <div className="text-sm font-bold text-white">3 面试官 + 1 候选人（我）</div>
+              <div className="text-[11px] text-white/50 mt-1 leading-relaxed">
+                结构化单面：3 位面试官轮流提问、追问深挖，你是唯一候选人，全程应答
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* 角色选择（12 角色卡抽 3）：Bento 玻璃卡网格 */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-semibold text-white/60">
-              选择面试官形象（<span className="tabular-nums">{selectedIds.length}</span>/3）
+              {format === 'panel' ? '选择面试官形象' : '选择候选人形象'}（<span className="tabular-nums">{selectedIds.length}</span>/3）
             </label>
             <button
               type="button"
@@ -180,7 +209,9 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
             </div>
           )}
           {selectedIds.length === 3 && violations.length === 0 && (
-            <div className="mt-2 text-xs text-emerald-300/80">✅ 组合满足约束：音色/形象/策略不重复，性格互补</div>
+            <div className="mt-2 text-xs text-emerald-300/80">
+              {format === 'panel' ? '✅ 组合满足约束：音色/形象不重复' : '✅ 组合满足约束：音色/形象/策略不重复，性格互补'}
+            </div>
           )}
         </div>
 

@@ -230,6 +230,23 @@ test('断线重连：非主动断线 → 退避重连成功；连续失败耗尽
   assert.ok(h2.events.log.includes('close'));
   h2.client.dispose();
 });
+test('初始建连即失败（生产无 WS 端点）：快速重试一次后直接降级，不拖常规退避', async () => {
+  const h = await makeClient({ initialRetryMs: 1 });
+  h.client.start();
+  // 从未 open 就断（ws 连接被拒）
+  h.sockets[0].drop();
+  await sleep(5);
+  assert.equal(h.sockets.length, 2, '应有一次快速重试');
+  // 重试仍未 open 即断 → 直接 error + close（不走 delays.length 次退避）
+  h.sockets[1].drop();
+  await sleep(5);
+  assert.equal(h.sockets.length, 2, '不应再进入常规退避重连');
+  assert.equal(h.client.state, 'error');
+  assert.ok(h.events.log.includes('error:REALTIME_RECONNECT_FAILED'));
+  assert.ok(h.events.log.includes('close'));
+  h.client.dispose();
+});
+
 
 test('上游 error 事件：response.cancel 噪音吞掉；server_error 上抛 onError', async () => {
   const h = await makeClient();

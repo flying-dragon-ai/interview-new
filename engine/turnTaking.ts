@@ -253,14 +253,15 @@ export function evaluateInterrupt(
   return { type: 'none' };
 }
 
-/** 用户被点名后 5 秒未回应 → 其他 AI 接话 */
+/** 用户被点名后未回应 → 其他 AI 接话（graceMs 覆盖默认阈值；panel 给候选人更长思考窗） */
 export function evaluateUserCalledNoResponse(
   cards: RoleCard[],
   state: TurnTakingState,
-  now: number
+  now: number,
+  graceMs: number = INTERRUPT_RULES.userCalledMs
 ): InterruptDecision {
   if (state.userCalledAt === null) return { type: 'none' };
-  if (now - state.userCalledAt < INTERRUPT_RULES.userCalledMs) return { type: 'none' };
+  if (now - state.userCalledAt < graceMs) return { type: 'none' };
   const responder = cards.find((c) => c.id !== state.currentSpeaker) ?? cards[0];
   if (!responder) return { type: 'none' };
   return { type: 'interrupt', interrupterId: responder.id, targetId: 'user', rule: 'user_called_no_response' };

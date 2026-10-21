@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isStepFunConfigured, STEPFUN_CONFIG } from './_lib/stepfun.ts';
-import { createSseWriter } from './_lib/sse.ts';
+import { createSseWriter, pipeUpstreamSse } from './_lib/sse.ts';
 import { checkRateLimit } from './_lib/ratelimit.ts';
+import { getClientIp } from './_lib/http.ts';
 
 /**
  * /api/asr —— StepFun ASR 服务端代理（PRD 4.1.6 / G.2 / C9）
@@ -13,12 +14,6 @@ import { checkRateLimit } from './_lib/ratelimit.ts';
 const STEP_ASR_URL = 'https://api.stepfun.com/v1/audio/asr/sse';
 const MAX_AUDIO_BASE64_CHARS = 14_000_000; // ≈10MB 音频，防滥用
 
-function getClientIp(req: VercelRequest): string | undefined {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string') return fwd.split(',')[0].trim();
-  if (Array.isArray(fwd)) return fwd[0];
-  return req.socket?.remoteAddress;
-}
 
 interface AsrFormat {
   type?: string;
@@ -104,45 +99,31 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   // SSE 透传：transcript.text.delta → delta；transcript.text.done → done；其余 error
   const sse = createSseWriter(response);
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const payload = line.slice(6).trim();
-        if (payload === '[DONE]') continue;
-        try {
-          const data = JSON.parse(payload) as {
-            type?: string;
-            delta?: string;
-            text?: string;
-            start_time?: number;
-            end_time?: number;
-            message?: string;
-          };
-          if (data.type === 'transcript.text.delta' && typeof data.delta === 'string') {
-            sse.send('delta', { delta: data.delta, start_time: data.start_time ?? null, end_time: data.end_time ?? null });
-          } else if (data.type === 'transcript.text.done') {
-            sse.send('done', { text: typeof data.text === 'string' ? data.text : '' });
-          } else if (data.type && data.type.includes('error')) {
-            sse.send('error', { message: data.message ?? 'ASR 上游错误' });
-          }
-        } catch {
-          // 忽略单条解析失败
+    await pipeUpstreamSse(upstream.body, (payload) => {
+      try {
+        const data = JSON.parse(payload) as {
+          type?: string;
+          delta?: string;
+          text?: string;
+          start_time?: number;
+          end_time?: number;
+          message?: string;
+        };
+        if (data.type === 'transcript.text.delta' && typeof data.delta === 'string') {
+          sse.send('delta', { delta: data.delta, start_time: data.start_time ?? null, end_time: data.end_time ?? null });
+        } else if (data.type === 'transcript.text.done') {
+          sse.send('done', { text: typeof data.text === 'string' ? data.text : '' });
+        } else if (data.type && data.type.includes('error')) {
+          sse.send('error', { message: data.message ?? 'ASR 上游错误' });
         }
+      } catch {
+        // 忽略单条解析失败
       }
-    }
+    });
   } catch (err) {
     sse.send('error', { message: err instanceof Error ? err.message : String(err) });
   } finally {
-    reader.releaseLock();
     sse.close();
   }
 }

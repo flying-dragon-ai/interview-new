@@ -1,8 +1,8 @@
 import React from 'react';
-import type { GameEvent, Message, RoleCard, SimulationState } from '../types';
+import type { GameEvent, InterviewFormat, Message, RoleCard, SimulationState } from '../types';
+import { HOST_CARD } from '../data/interviewerCards';
 import DiscussionPanel from './DiscussionPanel';
 import { detectCapabilities, type VoiceCapabilities } from '../services/voiceService';
-
 /**
  * VoiceRoom —— 语音群面房间外壳（PRD 6.1-1 组件化：DeviceCheck / VoiceRoom / AvatarStage / EvidenceReport）
  * 职责：房间上下文条（公司/岗位/角色/语音模式/退出）+ 装配 DiscussionPanel（倒计时引擎 + 发言权调度 + 语音）。
@@ -11,18 +11,20 @@ import { detectCapabilities, type VoiceCapabilities } from '../services/voiceSer
 interface VoiceRoomProps {
   state: SimulationState;
   roles: RoleCard[];
+  format?: InterviewFormat;
   sessionId: number | null;
   consentSaveTranscript: boolean;
   cameraEnabled: boolean;
   facingMode: 'user' | 'environment';
   voiceCaps?: VoiceCapabilities | null;
-  onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number) => void;
+  onFinish: (history: Message[], events: GameEvent[], sessionStartAt: number, visualRows?: import('../types').VisualFeatureRow[]) => void;
   onExit: () => void;
 }
 
 const VoiceRoom: React.FC<VoiceRoomProps> = ({
   state,
   roles,
+  format = 'lgd',
   sessionId,
   consentSaveTranscript,
   cameraEnabled,
@@ -44,7 +46,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
         <span className="text-white/25">·</span>
         <span>{state.jobTitle || '未填写岗位'}</span>
         <span className="text-white/25">·</span>
-        <span>{roles.length} 位 AI 面试官</span>
+        <span>{format === 'panel' ? `${roles.length} 位面试官 · 你是候选人` : `${roles.length} 位 AI 候选人 + 1 位主持面试官`}</span>
         <span className="text-white/25">·</span>
         <span>
           输入 {inputLabel} / 输出 {outputLabel}
@@ -59,6 +61,7 @@ const VoiceRoom: React.FC<VoiceRoomProps> = ({
         <DiscussionPanel
           state={state}
           roles={roles}
+          format={format}
           sessionId={sessionId}
           consentSaveTranscript={consentSaveTranscript}
           cameraEnabled={cameraEnabled}

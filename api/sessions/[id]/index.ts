@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getPool, isDatabaseConfigured } from '../../_lib/db.ts';
+import { deleteSessionCascade } from '../../_lib/schema.ts';
 
 /**
  * /api/sessions/{id}（PRD E.2）
@@ -23,15 +24,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     if (request.method === 'DELETE') {
-      await pool.query('DELETE FROM events WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM reports WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM visual_features WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM transcripts WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM conversation_records WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM ai_personas WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM feedback_reports WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      const result = await pool.query('DELETE FROM sessions WHERE id = $1 RETURNING id', [sessionId]).catch(() => ({ rows: [] }));
-      return response.status(200).json({ deleted: result.rows?.[0]?.id ?? sessionId });
+    if (request.method === 'DELETE') {
+      // 事务化级联删除（隐私 TC-11：不可恢复、不留半删状态）
+      await deleteSessionCascade(pool, sessionId);
+      return response.status(200).json({ deleted: sessionId });
+    }
     }
 
     return response.status(405).json({ error: 'Method not allowed' });

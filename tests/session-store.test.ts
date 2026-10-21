@@ -23,10 +23,7 @@ const simState: SimulationState = {
   topic: '是否应在全行业推行远程办公？请讨论效率、协作与成本三个要点。',
   jobTitle: '产品经理',
   company: '测试公司',
-  messages: [],
   status: 'DISCUSSING',
-  activeCharacterId: null,
-  round: 0,
 };
 
 const fakeReply = async (_params: unknown, onChunk: (c: string) => void): Promise<ReplyResult> => {

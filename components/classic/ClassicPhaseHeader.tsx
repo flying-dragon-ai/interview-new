@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { RoleCard } from '../../types';
 import {
   currentPhase,
@@ -26,7 +26,6 @@ export const STAGES = [
 
 interface Props {
   phaseState: PhaseState;
-  nowTs: number;
   phaseConfig: PhaseConfig;
   roles: RoleCard[];
   degraded: boolean;
@@ -37,7 +36,6 @@ interface Props {
 
 const ClassicPhaseHeader: React.FC<Props> = ({
   phaseState,
-  nowTs,
   phaseConfig,
   roles,
   degraded,
@@ -45,6 +43,12 @@ const ClassicPhaseHeader: React.FC<Props> = ({
   onToggleTopic,
   onSubmit,
 }) => {
+  // 组件自计时：倒计时只在顶栏重渲染（250ms），不拖动整棵房间树
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, []);
   const phase = currentPhase(phaseState, phaseConfig);
   const remaining = phaseRemainingMs(phaseState, nowTs, phaseConfig);
   const progress = phaseProgress(phaseState, nowTs, phaseConfig);

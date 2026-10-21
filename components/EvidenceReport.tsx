@@ -13,7 +13,10 @@ const LazyCertificateSection = lazy(() => import('./CertificateSection'));
 
 interface EvidenceReportProps {
   report: ReportV15;
+  /** 旧 4 字段报告（冗余展示）：外部已生成时直接展示 */
   legacy?: FeedbackData | null;
+  /** 旧报告懒加载（App 不再无条件预生成；点击按钮才消耗一次 LLM 调用） */
+  loadLegacy?: () => Promise<FeedbackData>;
   messages?: Message[];
   events?: GameEvent[];
   sessionStartAt?: number;
@@ -61,6 +64,7 @@ const EvidenceItem: React.FC<{ evidence: Evidence; onClick?: () => void }> = ({ 
 const EvidenceReport: React.FC<EvidenceReportProps> = ({
   report,
   legacy,
+  loadLegacy,
   messages = [],
   events = [],
   sessionStartAt = 0,
@@ -72,6 +76,9 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [highlightMsgIndex, setHighlightMsgIndex] = useState<number | null>(null);
+  const [legacyData, setLegacyData] = useState<FeedbackData | null>(legacy ?? null);
+  const [legacyLoading, setLegacyLoading] = useState(false);
+  const [legacyError, setLegacyError] = useState(false);
 
   const handleDelete = async () => {
     if (!sessionId || !onDeleteRecords) return;
@@ -268,27 +275,54 @@ const EvidenceReport: React.FC<EvidenceReportProps> = ({
         </Suspense>
       )}
 
-      {/* 旧 4 字段（冗余展示，PRD D.2）：折叠面板 */}
-      {legacy && (
-        <details className="glass-details mb-8">
+      {/* 旧 4 字段（冗余展示，PRD D.2）：懒加载折叠面板——点击才消耗一次 LLM 调用 */}
+      {(legacyData || legacyError) && (
+        <details className="glass-details mb-8" open={legacyError}>
           <summary className="text-sm font-bold text-white/40 cursor-pointer hover:text-white/70 transition-colors">
             展开经典四维评价（旧版字段）▾
           </summary>
           <div className="glass-details-body grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-            <div className="glass-panel p-4 text-sm text-white/70">
-              <b className="text-white/85">发言时机：</b>
-              {legacy.timing}
-            </div>
-            <div className="glass-panel p-4 text-sm text-white/70">
-              <b className="text-white/85">结构贡献：</b>
-              {legacy.structuralContribution}
-            </div>
-            <div className="glass-panel p-4 text-sm text-white/70 md:col-span-2">
-              <b className="text-white/85">抗压/冲突处理：</b>
-              {legacy.interruptionHandling}
-            </div>
+            {legacyError && !legacyData ? (
+              <div className="glass-panel p-4 text-sm text-white/50 md:col-span-2">经典四维评价生成失败（LLM 异常），不影响上方 v1.5 报告。</div>
+            ) : legacyData ? (
+              <>
+                <div className="glass-panel p-4 text-sm text-white/70">
+                  <b className="text-white/85">发言时机：</b>
+                  {legacyData.timing}
+                </div>
+                <div className="glass-panel p-4 text-sm text-white/70">
+                  <b className="text-white/85">结构贡献：</b>
+                  {legacyData.structuralContribution}
+                </div>
+                <div className="glass-panel p-4 text-sm text-white/70 md:col-span-2">
+                  <b className="text-white/85">抗压/冲突处理：</b>
+                  {legacyData.interruptionHandling}
+                </div>
+              </>
+            ) : null}
           </div>
         </details>
+      )}
+      {!legacyData && loadLegacy && (
+        <div className="mb-8 text-center">
+          <button
+            onClick={async () => {
+              setLegacyLoading(true);
+              setLegacyError(false);
+              try {
+                setLegacyData(await loadLegacy());
+              } catch {
+                setLegacyError(true);
+              } finally {
+                setLegacyLoading(false);
+              }
+            }}
+            disabled={legacyLoading}
+            className="glass-btn-ghost px-4 py-2 text-xs font-bold"
+          >
+            {legacyLoading ? '经典四维评价生成中…' : '展开经典四维评价（旧版字段，需一次 AI 调用）'}
+          </button>
+        </div>
       )}
 
       {/* 隐私与删除 */}

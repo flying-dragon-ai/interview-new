@@ -47,7 +47,10 @@ export function verifyToken(token: string): { valid: boolean; payload?: Record<s
   if (!secret || !token) return { valid: false };
   const [body, sig] = token.split('.');
   if (!body || !sig) return { valid: false };
-  if (sign(body, secret) !== sig) return { valid: false };
+  // 常数时间比较（防 HMAC 时序侧信道）
+  const expected = Buffer.from(sign(body, secret));
+  const received = Buffer.from(sig);
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return { valid: false };
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Record<string, unknown>;
     if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {

@@ -71,15 +71,22 @@ query-param 鉴权。因此前端不能直连上游，必须走**服务端 WS �
 VAD 事件 + 分段 final 转写保证。
 
 ## 4. 关闭自动回复（本项目把 Realtime 当「流式 ASR + VAD」用）
+## 4. 自动回复治理（M8 起：Realtime 为唯一语音通道，AI 语音走 response.audio）
 
-文档未提供关闭自动回复的开关：server_vad 模式下 `input_audio_buffer.append` 会**自动触发大模型推理**。
-按既定方案（计划 §2.1 兜底分支）处理，全部收敛在 `realtimeClient.ts`：
+server_vad 模式下 `input_audio_buffer.append` 会自动触发大模型推理。M7 时代把 Realtime 仅当
+「流式 ASR + VAD」用（取消 + 忽略全部 response.*）；**M8 全面切换后语义升级**：
 
-1. `session.update` 不设置 `instructions`（或置最小指令），不追求模型回复质量；
-2. 收到 `input_audio_buffer.speech_started` 立即发送 `response.cancel`（掐掉可能已启动的响应）；
-3. **忽略一切 `response.*` 事件**（音频/文本/thinking 全部丢弃，不播放）；
-4. 只消费：`speech_started` / `speech_stopped` / `conversation.item.input_audio_transcription.completed` / `error`。
-
+1. 用户侧链路不变：`speech_started` → 400ms 确认窗 → onVadStart；转写 `completed` → sendUserSpeech；
+2. `speech_started` 仍立即 `response.cancel` —— 目的是掐掉模型对用户语音的**自由发挥**（面试内容必须由导演 LLM 生成）；
+3. AI 发言：导演 LLM 生成台词 → `RealtimeClient.speak(line)` 发送
+   `conversation.item.create`（user 文本，附【台词播报】逐字指令）+ `response.create`；
+4. AI 音频消费：`response.audio.delta`（base64 pcm16，默认按 24kHz 解码，实测不符只改
+   `services/realtimePlayback.ts` 的 `REALTIME_OUTPUT_SAMPLE_RATE`）→ `RealtimePlayback` 排队播放；
+   字幕：`response.audio_transcript.delta/.done`；`response.done` 收敛播放态；
+5. `session.update.instructions` 固定为「语音播报通道」人设（DEFAULT_BROADCAST_INSTRUCTIONS），
+   不回话、只逐字播报台词；
+6. 降级链路保留：Realtime 不可用（503/断线重连耗尽/麦克风失败）→ AI 语音退回
+   StepFun TTS（/api/tts）→ 浏览器 speechSynthesis → 纯文字；用户语音退回按键说话。
 ## 5. 断线重连与 session 过期
 
 文档未明确 session 过期时间与重连语义。按低风险默认实现：

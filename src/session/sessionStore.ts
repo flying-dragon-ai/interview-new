@@ -14,7 +14,6 @@ export interface SessionSnapshot {
   messages: Message[]; // 含 speaker / source（M7 新增可选字段）
   events: GameEvent[];
   phase: PhaseState;
-  nowTs: number;
   activeCharId: string | null; // 被调度选中
   speakingCharId: string | null; // 正在出声
   streamingText: string;
@@ -45,7 +44,6 @@ export function makeInitialSnapshot(now: number, opts?: { cameraOn?: boolean }):
     messages: [],
     events: [],
     phase: initPhaseEngine(now),
-    nowTs: now,
     activeCharId: null,
     speakingCharId: null,
     streamingText: '',

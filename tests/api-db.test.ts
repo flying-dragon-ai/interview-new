@@ -28,6 +28,11 @@ function mockPool(responder?: (sql: string, params: unknown[]) => { rows: any[] 
       if (responder) return responder(sql, params);
       return { rows: [] };
     },
+    // 事务化级联删除（api/_lib/schema.ts deleteSessionCascade）经 client 走
+    connect: async () => ({
+      query: pool.query,
+      release: () => undefined,
+    }),
   };
   return { pool, recorded };
 }
@@ -130,10 +135,9 @@ test('E.1: POST /api/session 写入 sessions（roles JSONB / topic_type / starte
 });
 
 test('D.2 迁移兼容：新列不存在时回退旧 schema（simulation_sessions + ai_personas）', async () => {
-  let firstInsert = true;
   const { pool, recorded } = mockPool((sql) => {
-    if (/INSERT INTO sessions/.test(sql) && firstInsert) {
-      firstInsert = false;
+    // v0.8 链路：sessions 的任何一次插入（v08/v071）都因缺列失败 → 最终回退旧表
+    if (/INSERT INTO sessions/.test(sql)) {
       throw new Error('column "roles" of relation "sessions" does not exist');
     }
     return { rows: [{ id: 99 }] };

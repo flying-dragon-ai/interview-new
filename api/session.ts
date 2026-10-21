@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getPool, isDatabaseConfigured } from './_lib/db.ts';
+import { insertSessionAdaptive, deleteSessionCascade } from './_lib/schema.ts';
 import { resolveRoleCards } from '../engine/roleSelector.ts';
 import { WALLET_ADDRESS_RE, normalizeWalletAddress } from './_lib/wallet.ts';
 
@@ -25,6 +26,8 @@ interface SessionBody {
   /** Q-N1：Para 钱包地址（0x…42 字符），免登录用户标识 */
   wallet_address?: string | null;
   status?: string;
+  /** v0.8：群面阵型 lgd | panel（缺列旧库自动降级不入库） */
+  format?: string;
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -48,6 +51,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
       } else if (request.query.user_id) {
         query += ' WHERE user_id = $1';
         params.push(Number(request.query.user_id));
+      } else {
+        // 隐私门禁：拒绝无条件全表列举（匿名访客不可见他人会话）
+        return response.status(400).json({ error: '必须提供 wallet_address 或 user_id 过滤条件' });
       }
       query += ' ORDER BY created_at DESC';
       const result = await pool.query(query, params);
@@ -75,55 +81,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const cameraEnabled = Boolean(body.camera_enabled);
       const userId = body.user_id ? Number(body.user_id) : null;
 
-      const isSchemaMiss = (e: any) => /sessions|column|relation/i.test(String(e?.message ?? ''));
-      const insertV071 = (withWallet: boolean) =>
-        withWallet
-          ? pool.query(
-              `INSERT INTO sessions (company, job_title, topic, topic_type, roles, voice_enabled, camera_enabled, status, user_id, wallet_address, started_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, 'DISCUSSING', $8, $9, NOW()) RETURNING *`,
-              [company, job_title, topic, topicType, JSON.stringify(roles), voiceEnabled, cameraEnabled, userId, walletAddress]
-            )
-          : pool.query(
-              `INSERT INTO sessions (company, job_title, topic, topic_type, roles, voice_enabled, camera_enabled, status, user_id, started_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, 'DISCUSSING', $8, NOW()) RETURNING *`,
-              [company, job_title, topic, topicType, JSON.stringify(roles), voiceEnabled, cameraEnabled, userId]
-            );
-
-      const insertLegacy = async () => {
-        // 兼容：迁移尚未执行时退回旧 schema（simulation_sessions + ai_personas）
-        const legacy = await pool.query(
-          `INSERT INTO simulation_sessions (company, job_title, topic, status, user_id) VALUES ($1, $2, $3, 'DISCUSSING', $4) RETURNING *`,
-          [company, job_title, topic, userId]
-        );
-        const row = legacy.rows[0];
-        for (const card of roles) {
-          await pool.query(
-            `INSERT INTO ai_personas (session_id, character_id, name, role, personality, color) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [row.id, card.id, card.name, card.persona.conflict_level, card.persona.legacy_personality ?? card.persona.speaking_style, 'bg-slate-500']
-          ).catch(() => undefined);
-        }
-        return row;
-      };
-
-      let session: any;
-      try {
-        // v0.7.1 schema（含 wallet_address，db/migration-v0.7.1-wallet.sql）
-        session = (await insertV071(true)).rows[0];
-      } catch (err1: any) {
-        if (!isSchemaMiss(err1)) throw err1;
-        if (!/wallet_address/i.test(String(err1?.message ?? ''))) {
-          // 缺的是其他新列 → v0.7 之前的旧库，直接回退旧表
-          session = await insertLegacy();
-        } else {
-          try {
-            // 仅缺 wallet_address → v0.7 库未跑 v0.7.1 迁移，去掉钱包列重试
-            session = (await insertV071(false)).rows[0];
-          } catch (err2: any) {
-            if (!isSchemaMiss(err2)) throw err2;
-            session = await insertLegacy();
-          }
-        }
-      }
+      // v0.8 → v0.7.1 → v0.7 → legacy 自适应插入（schema.ts 统一收口）
+      const session = await insertSessionAdaptive(pool, {
+        company,
+        job_title,
+        topic,
+        topicType,
+        roles,
+        voiceEnabled,
+        cameraEnabled,
+        userId,
+        walletAddress,
+        format: body.format === 'panel' ? 'panel' : 'lgd',
+      });
       return response.status(200).json(session);
     }
 
@@ -147,15 +117,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (!sessionId) {
         return response.status(400).json({ error: 'session_id 必填' });
       }
-      await pool.query('DELETE FROM events WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM reports WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM visual_features WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM transcripts WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM conversation_records WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM ai_personas WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      await pool.query('DELETE FROM feedback_reports WHERE session_id = $1', [sessionId]).catch(() => undefined);
-      const result = await pool.query('DELETE FROM sessions WHERE id = $1 RETURNING id', [sessionId]).catch(() => ({ rows: [] }));
-      return response.status(200).json({ deleted: result.rows?.[0]?.id ?? sessionId });
+      // 事务化级联删除（隐私 TC-11：不可恢复、不留半删状态）
+      await deleteSessionCascade(pool, sessionId);
+      return response.status(200).json({ deleted: sessionId });
     }
 
     // ---- 详情 ----
