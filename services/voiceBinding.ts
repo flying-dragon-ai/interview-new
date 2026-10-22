@@ -12,33 +12,47 @@ import type { RoleVoice } from '../types.ts';
  * 3. voice_id 是本仓库旧 TTS 音色 → 映射到听感最近的系统音色（保证默认可播）
  * 4. 其余 ID 视为语音复刻 ID，原样透传给 session.update.voice 和 TTS
  *
- * 系统音色清单来自 StepFun Realtime Chat 文档（Voices，2026-10 抓取）。
- * 官方控制台 README 里的示例（qingchunshaonv 等）属于更早的 step-audio-2 命名，
- * 不在此白名单内；若上游改名，只改本文件的映射表。
+ * 系统音色是 2026-10-22 对 `stepaudio-3-realtime-preview` 的真 key 握手结果。
+ * `GET /v1/audio/system_voices?model=step-tts-2` 的英文 id（soft-spoken-gentleman、
+ * vibrant-youth、lively-girl 等）在这个 Realtime 模型上会 400，不能再映射过去。
+ * 若上游改名，只改本文件。
  */
 
 export const REALTIME_SYSTEM_VOICES = [
-  'soft-spoken-gentleman',
-  'magnetic-voiced-male',
-  'vibrant-youth',
-  'lively-girl',
-  'livelybreezy-female',
+  'boyinnansheng',
+  'cixingnansheng',
   'elegantgentle-female',
-  'zixinnansheng',
+  'jingdiannvsheng',
+  'jilingshaonv',
+  'lengyanyujie',
+  'linjiajiejie',
+  'linjiameimei',
+  'livelybreezy-female',
+  'qingchunshaonv',
+  'qingniandaxuesheng',
+  'qinqienvsheng',
+  'ruyananshi',
+  'shenchennanyin',
+  'shuangkuaijiejie',
+  'wenrounansheng',
+  'wenrounvsheng',
+  'youyanvsheng',
+  'yuanqinansheng',
+  'yuanqishaonv',
+  'zhengpaiqingnian',
+  'zhixingjiejie',
 ] as const;
 
 export type RealtimeSystemVoice = (typeof REALTIME_SYSTEM_VOICES)[number];
 
 /**
- * 旧 TTS 音色 → Realtime 系统音色。
- * 主持占用 soft-spoken-gentleman，livelybreezy-female 留给以后的复刻/新角色，避免默认撞声。
+ * 角色卡仍在用、但 Realtime 模型不接受的旧 TTS id。
+ * 正派青年 / 深沉男音 / 知性姐姐已经能直接作为 Realtime voice，不必再映射。
+ * 爽快男声、干练女声会被 400，改接到听感接近、且和主持不撞车的系统音色。
  */
 export const LEGACY_TTS_TO_REALTIME: Record<string, RealtimeSystemVoice> = {
-  zhengpaiqingnian: 'vibrant-youth',
-  shenchennanyin: 'magnetic-voiced-male',
-  shuangkuainansheng: 'zixinnansheng',
-  ganliannvsheng: 'lively-girl',
-  zhixingjiejie: 'elegantgentle-female',
+  shuangkuainansheng: 'yuanqinansheng',
+  ganliannvsheng: 'elegantgentle-female',
 };
 
 export type VoiceBindingSource = 'explicit' | 'system' | 'legacy-map' | 'clone';

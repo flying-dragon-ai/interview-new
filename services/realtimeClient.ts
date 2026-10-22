@@ -361,6 +361,11 @@ export class RealtimeClient {
         if (this.channel === 'ear') this.sendJson({ type: 'response.cancel' });
         this.handleVadStop();
         break;
+      case 'response.created':
+        // speech_stopped 当下响应往往还没创建，cancel 会变成 "no ongoing response to cancel"。
+        // 耳会话等响应真正出现再取消，避免模型用默认音色把用户的话答回去。
+        if (this.channel === 'ear') this.sendJson({ type: 'response.cancel' });
+        break;
       case 'conversation.item.input_audio_transcription.completed':
         if (typeof msg.transcript === 'string' && msg.transcript.trim()) {
           this.events.onUserTranscript({ text: msg.transcript, isFinal: true });
@@ -388,8 +393,8 @@ export class RealtimeClient {
         break;
       case 'error': {
         const code = msg.error?.type ?? 'REALTIME_ERROR';
-        // response.cancel 在无响应时返回的错误属正常噪音，吞掉。
-        // 其他 invalid_request_error（例如音色 ID 被拒）必须上抛，嘴会话才能降级。
+        // 空闲时 response.cancel 的真实文案是 "no ongoing response to cancel"，吞掉。
+        // 音色被拒是 request_params_invalid / code 400，必须上抛，嘴会话才能降级。
         if (code === 'invalid_request_error' && /cancel/i.test(msg.error?.message ?? '')) return;
         this.events.onError({ code, message: msg.error?.message ?? '上游错误' });
         break;

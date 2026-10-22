@@ -110,9 +110,13 @@ const card = (id: string): RoleCard => ROLE_CARDS.find((c) => c.id === id)!;
 
 test('音色解析：旧 TTS ID 映射，系统音色与复刻 ID 原样透传', () => {
   const legacy = resolveVoiceBinding({ voice_id: 'zhengpaiqingnian' });
-  assert.equal(legacy.realtimeVoiceId, 'vibrant-youth');
+  assert.equal(legacy.realtimeVoiceId, 'zhengpaiqingnian');
   assert.equal(legacy.cloned, false);
-  assert.equal(legacy.source, 'legacy-map');
+  assert.equal(legacy.source, 'system');
+  const rejected = resolveVoiceBinding({ voice_id: 'ganliannvsheng' });
+  assert.equal(rejected.realtimeVoiceId, 'elegantgentle-female');
+  assert.equal(rejected.source, 'legacy-map');
+  assert.equal(resolveVoiceBinding({ voice_id: 'shuangkuainansheng' }).realtimeVoiceId, 'yuanqinansheng');
 
   const system = resolveVoiceBinding({ voice_id: 'livelybreezy-female' });
   assert.equal(system.realtimeVoiceId, 'livelybreezy-female');
@@ -128,7 +132,7 @@ test('音色解析：旧 TTS ID 映射，系统音色与复刻 ID 原样透传',
   assert.equal(explicit.source, 'explicit');
   assert.equal(explicit.cloned, true);
 
-  assert.equal(resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId, 'soft-spoken-gentleman');
+  assert.equal(resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId, 'wenrounansheng');
   assert.notEqual(
     resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId,
     resolveVoiceBinding({ voice_id: HOST_CARD.voice.voice_id }).realtimeVoiceId
@@ -153,9 +157,9 @@ test('耳会话只听，嘴会话按解析后的音色去重，复刻 ID 原样�
   assert.equal(sessionUpdate(ear!)?.session.voice, undefined, '耳会话不锁定音色');
   assert.equal((sessionUpdate(ear!)?.session.turn_detection as { type?: string } | undefined)?.type, 'server_vad');
 
-  const youth = h.sockets.find((ws) => sessionUpdate(ws)?.session.voice === 'vibrant-youth');
+  const youth = h.sockets.find((ws) => sessionUpdate(ws)?.session.voice === 'zhengpaiqingnian');
   const clone = h.sockets.find((ws) => sessionUpdate(ws)?.session.voice === 'clone_user_voice_42');
-  assert.ok(youth, '旧 TTS 音色应映射到 vibrant-youth');
+  assert.ok(youth, '正派青年音色应原样作为 Realtime voice');
   assert.ok(clone, '复刻音色 ID 应原样作为 voice');
   assert.equal(sessionUpdate(youth!)?.session.turn_detection, undefined, '嘴会话关闭 VAD');
   assert.equal(sessionUpdate(clone!)?.session.turn_detection, undefined);
@@ -197,7 +201,7 @@ test('嘴会话尚未 open 时台词排队，open 后冲刷', async () => {
   assert.equal(h.router.isAIPlaying(), true, '排队中的台词也应挡住下一位');
   assert.equal(mouth.sent.length, 0);
   mouth.open();
-  assert.equal(sessionUpdate(mouth)?.session.voice, 'lively-girl');
+  assert.equal(sessionUpdate(mouth)?.session.voice, 'elegantgentle-female');
   const sent = mouth.sentJson().filter((m) => m.type === 'conversation.item.create');
   assert.equal(sent.length, 1);
   assert.ok(JSON.stringify(sent[0]).includes('自我介绍'));
@@ -268,13 +272,13 @@ test('会话接线：AI 台词进对应嘴会话，转写仍归属 ai:<roleId>�
   const c = new SessionController(deps());
   await c.initRealtime();
   assert.equal(c.store.getSnapshot().realtimeStatus, 'active');
-  assert.ok(mouths.includes('soft-spoken-gentleman'), '无领导讨论应为主持单开音色');
+  assert.ok(mouths.includes('wenrounansheng'), '无领导讨论应为主持单开音色');
   assert.equal(new Set(mouths).size, 4, '3 位候选人 + 主持，四把不同的声音');
   c.forcePhaseForTest({ phaseIndex: 2, phaseStartedAt: Date.now(), openingIndex: 4, openingStartedAt: Date.now(), finished: false });
   await c.triggerAITurn(roles[0], { speakerKind: 'candidate', force: true });
   assert.equal(spoken.length, 1);
   assert.equal(spoken[0].channel, 'mouth');
-  assert.equal(spoken[0].voice, 'lively-girl');
+  assert.equal(spoken[0].voice, 'elegantgentle-female');
   assert.ok(spoken[0].text.includes('对齐'));
   const msg = c.store.getSnapshot().messages[0];
   assert.equal(msg.speaker, 'ai:ib_analyst');
@@ -295,7 +299,7 @@ test('会话接线：AI 台词进对应嘴会话，转写仍归属 ai:<roleId>�
   );
   await panel.initRealtime();
   assert.equal(panelMouths.length, 2);
-  assert.ok(!panelMouths.includes('soft-spoken-gentleman'), '结构化单面不加入主持音色');
+  assert.ok(!panelMouths.includes('wenrounansheng'), '结构化单面不加入主持音色');
   panel.dispose();
 
   const down = new SessionController(

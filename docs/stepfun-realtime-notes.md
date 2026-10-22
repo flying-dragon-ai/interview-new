@@ -108,14 +108,16 @@ server_vad 模式下 `input_audio_buffer.append` 会自动触发大模型推理�
 
 - [ ] 短时 token（`issueToken('realtime')`）能否作为 query param 鉴权直连上游（官方无文档，默认走服务端代理）；
 - [ ] session 空闲多久被服务器关闭。开发指南（2026-10-22 抓取）写明实时会话最长 30 分钟；空闲掐断仍未实测；
-- [ ] `response.cancel` 在无响应时返回的 error 码形态（适配层需吞掉，不当失败上抛）；
+- [x] `response.cancel` 在无响应时返回 `invalid_request_error`，message 为 `no ongoing response to cancel`。适配层按 message 含 cancel 吞掉，不当失败上抛。
 - [ ] StepFun TTS 的 `tts.response.subtitle` 词级时间戳（A7 口型升级项）字段形态，见 `tts` 通道文档；
-- [ ] `stepaudio-3-realtime-preview` 是否接受 `voiceBinding.ts` 的 7 个系统音色。2026-10-22 真 key 未注入，未握手。官方页面没有给该模型单独白名单，详见设计文档第 11 节「实测结果」。
+- [x] `stepaudio-3-realtime-preview` 的音色以 `voiceBinding.ts` 为准。2026-10-22 真 key：`soft-spoken-gentleman` 等 TTS 英文 id 返回 `request_params_invalid` / 400；角色卡里能直接播的中文 id 已改成原样使用。详见设计文档第 11 节。
 
 ## 8. 多角色（2026-10）
 
 单条 Realtime 连接只能锁定一把 `voice`，且产出音频后不能再改。多角色不要在一条连接里换音色。
-架构、复刻音色扩展和降级见 [realtime-duplex-design.md](./realtime-duplex-design.md)。2026-10-22 的真 key 联调没有跑成：代理进程没有 `STEPFUN_API_KEY`，默认音色映射因此没有改。
+架构、复刻音色扩展和降级见 [realtime-duplex-design.md](./realtime-duplex-design.md)。
+
+2026-10-22 带 key 复测后，默认音色映射已按握手结果改过，见设计文档第 11 节。代理必须按文本帧转发 JSON，否则 `session.update` 没有 `session.updated`。
 
 适配层分工：
 
