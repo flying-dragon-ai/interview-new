@@ -167,8 +167,13 @@ test('validatePanelSelection：3 面试官音色/形象去重，无性格互补�
   // 音色重复 → panel 违规
   const dupVoice = pick(['tech_visionary', 'crypto_pioneer', 'product_legend']); // tech_visionary 与 crypto_pioneer 同 voice_01
   assert.ok(validatePanelSelection(dupVoice).some((v) => v.rule === 'voice_unique'));
-  // 数量不足
-  assert.ok(validatePanelSelection(ok.slice(0, 2)).some((v) => v.rule === 'count'));
+  // 2 位面试官合法（人数可配置，默认仍是 3）
+  assert.deepEqual(validatePanelSelection(ok.slice(0, 2)), []);
+  // 显式要求 3 位时，2 位不够
+  assert.ok(validatePanelSelection(ok.slice(0, 2), 3).some((v) => v.rule === 'count'));
+  // 1 位或 4 位都不合法
+  assert.ok(validatePanelSelection(ok.slice(0, 1)).some((v) => v.rule === 'count'));
+  assert.ok(validatePanelSelection([...ok, ok[0]]).some((v) => v.rule === 'count'));
 });
 
 test('buildHostPrompt：主持台词指令，不发表业务观点', () => {

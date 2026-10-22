@@ -33,8 +33,17 @@ export interface RealtimeEvents {
   onAssistantTextDone?(text: string): void;
   /** AI 播放态变化（开始/排空/被打断）——上层驱动 speakingCharId */
   onPlaybackChange?(speaking: boolean): void;
+  /** 连接已 open 且 session.update 已发出（嘴会话用来冲刷排队台词） */
+  onOpen?(): void;
 }
 export type RealtimeState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+
+/**
+ * duplex：单连接双向（历史默认，耳+嘴同一把声音）
+ * ear：只听用户（麦克风 + VAD + 转写），丢弃模型音频
+ * mouth：只播某一把音色，不采集麦克风，不开启 VAD
+ */
+export type RealtimeChannel = 'duplex' | 'ear' | 'mouth';
 
 /** WS 最小接口（浏览器 WebSocket / 测试 mock 共形） */
 export interface WsLike {
@@ -63,6 +72,8 @@ export interface RealtimeClientOptions {
   micFactory?: (onFrame: (pcm16Base64: string) => void) => Promise<MicHandle>;
   /** AI 台词播报指令（session.update instructions；缺省为逐字播报指令） */
   instructions?: string;
+  /** 连接角色。缺省 duplex，保持单连接行为。 */
+  channel?: RealtimeChannel;
   /** 播放器工厂（测试注入；默认 RealtimePlayback） */
   playbackFactory?: () => RealtimePlayback;
   /** VAD 起点后的确认窗（咳嗽/键盘过滤），默认 400ms */
@@ -95,6 +106,10 @@ export class RealtimeUnavailableError extends Error {
 export const DEFAULT_BROADCAST_INSTRUCTIONS =
   '你是面试室的语音播报通道。用户说话时你不要自行回答或展开（系统会取消你的回复）。' +
   '只有当收到以【台词播报】开头的用户消息时，把其中的台词用自然、清晰的口语逐字读出，保持原语言与原语气，一字不差。';
+
+/** 耳会话人设：只做听写，不生成可播放的回答 */
+export const DEFAULT_EAR_INSTRUCTIONS =
+  '你是面试室的听写通道，只负责感知用户是否在说话。不要回答，不要播报，不要展开任何内容。';
 
 export const REALTIME_INPUT_SAMPLE_RATE = 16000;
 
@@ -141,9 +156,13 @@ export class RealtimeClient {
   private vadConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private lastBargeAt = -Infinity;
   private _state: RealtimeState = 'idle';
+  private readonly channel: RealtimeChannel;
+  /** 晚绑定：多音色路由在耳会话建好后挂上，用于开口瞬间停掉其他嘴 */
+  private localBargeHandler: (() => void) | null = null;
 
   private constructor(opts: RealtimeClientOptions & { url: string; model: string }) {
     this.events = opts.events;
+    this.channel = opts.channel ?? 'duplex';
     this.playback = (opts.playbackFactory ?? (() => new RealtimePlayback()))();
     this.opts = {
       ...opts,
@@ -198,6 +217,14 @@ export class RealtimeClient {
     this.muted = muted;
   }
 
+  /**
+   * 用户开口瞬间的额外回调（确认窗之前）。
+   * 多音色路由用它同步停掉其他 voice 会话，不把 StepFun 事件名泄漏到路由层。
+   */
+  setLocalBargeHandler(handler: (() => void) | null): void {
+    this.localBargeHandler = handler;
+  }
+
   // ==================== AI 台词播报（全面切换实时对话 M8） ====================
 
   /**
@@ -205,15 +232,19 @@ export class RealtimeClient {
    * 模型以语音回复（response.audio.delta），本类直接入队播放；字幕经 onAssistantTextDelta/Done 上抛。
    * 非连接态静默丢弃（上层经 state 判断，降级链路接管）。
    */
-  speak(text: string): void {
+  speak(text: string, delivery: 'wrap' | 'verbatim' = 'wrap'): void {
     const line = text.trim();
     if (!line) return;
+    const payload =
+      delivery === 'verbatim'
+        ? line
+        : `【台词播报】请用自然口语逐字读出下面这段台词，一字不差，不要添加、解释或改写任何内容：\n${line}`;
     this.sendJson({
       type: 'conversation.item.create',
       item: {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: `【台词播报】请用自然口语逐字读出下面这段台词，一字不差，不要添加、解释或改写任何内容：\n${line}` }],
+        content: [{ type: 'input_text', text: payload }],
       },
     });
     this.sendJson({ type: 'response.create' });
@@ -249,24 +280,28 @@ export class RealtimeClient {
       this.everOpened = true;
       this.reconnectAttempt = 0;
       // 会话配置：开启服务端 VAD + 台词播报指令（AI 语音走 response.audio，模型自由发挥被 response.cancel 抑制）
-      this.sendJson({
-        type: 'session.update',
-        session: {
-          modalities: ['text', 'audio'],
-          instructions: this.opts.instructions ?? DEFAULT_BROADCAST_INSTRUCTIONS,
-          ...(this.opts.voice ? { voice: this.opts.voice } : {}),
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-          turn_detection: {
-            type: 'server_vad',
-            prefix_padding_ms: 500,
-            silence_duration_ms: 100,
-            energy_awakeness_threshold: 2500,
-          },
-        },
-      });
+      const session: Record<string, unknown> = {
+        modalities: ['text', 'audio'],
+        instructions:
+          this.opts.instructions ??
+          (this.channel === 'ear' ? DEFAULT_EAR_INSTRUCTIONS : DEFAULT_BROADCAST_INSTRUCTIONS),
+        ...(this.opts.voice ? { voice: this.opts.voice } : {}),
+        input_audio_format: 'pcm16',
+        output_audio_format: 'pcm16',
+      };
+      // 嘴会话关闭 VAD：不接收麦克风，避免空转推理；文档默认即关闭。
+      if (this.channel !== 'mouth') {
+        session.turn_detection = {
+          type: 'server_vad',
+          prefix_padding_ms: 500,
+          silence_duration_ms: 100,
+          energy_awakeness_threshold: 2500,
+        };
+      }
+      this.sendJson({ type: 'session.update', session });
       this._state = 'open';
-      void this.startMic();
+      this.events.onOpen?.();
+      if (this.channel !== 'mouth') void this.startMic();
     };
 
     ws.onmessage = (ev) => this.handleMessage(ev.data);
@@ -322,10 +357,18 @@ export class RealtimeClient {
     }
     switch (msg.type) {
       case 'input_audio_buffer.speech_started':
-        this.handleVadStart();
+        // 嘴会话不听麦克风，误触发的 VAD 不能取消正在播的台词
+        if (this.channel !== 'mouth') this.handleVadStart();
         break;
       case 'input_audio_buffer.speech_stopped':
+        // 耳会话在说话结束时再取消一次，掐掉 server VAD 在句尾自动拉起的回复
+        if (this.channel === 'ear') this.sendJson({ type: 'response.cancel' });
         this.handleVadStop();
+        break;
+      case 'response.created':
+        // speech_stopped 当下响应往往还没创建，cancel 会变成 "no ongoing response to cancel"。
+        // 耳会话等响应真正出现再取消，避免模型用默认音色把用户的话答回去。
+        if (this.channel === 'ear') this.sendJson({ type: 'response.cancel' });
         break;
       case 'conversation.item.input_audio_transcription.completed':
         if (typeof msg.transcript === 'string' && msg.transcript.trim()) {
@@ -333,6 +376,8 @@ export class RealtimeClient {
         }
         break;
       case 'response.audio.delta':
+        // 耳会话的模型音频一律丢弃，避免和嘴会话双声道齐播
+        if (this.channel === 'ear') break;
         if (typeof (msg as { delta?: unknown }).delta === 'string' && (msg as { delta: string }).delta) {
           this.playback.enqueue((msg as { delta: string }).delta);
           this.events.onPlaybackChange?.(true);
@@ -352,8 +397,9 @@ export class RealtimeClient {
         break;
       case 'error': {
         const code = msg.error?.type ?? 'REALTIME_ERROR';
-        // response.cancel 在无响应时返回的错误属正常噪音，吞掉
-        if (/cancel/i.test(msg.error?.message ?? '') || code === 'invalid_request_error') return;
+        // 空闲时 response.cancel 的真实文案是 "no ongoing response to cancel"，吞掉。
+        // 音色被拒是 request_params_invalid / code 400，必须上抛，嘴会话才能降级。
+        if (code === 'invalid_request_error' && /cancel/i.test(msg.error?.message ?? '')) return;
         this.events.onError({ code, message: msg.error?.message ?? '上游错误' });
         break;
       }
@@ -370,6 +416,7 @@ export class RealtimeClient {
     if (this.vadConfirmTimer) return; // 已在确认窗内
     // 掐掉模型对用户语音的自动回复（AI 台词经显式 response.create 触发）
     this.sendJson({ type: 'response.cancel' });
+    this.localBargeHandler?.();
     if (this.playback.playing) {
       this.playback.stop();
       this.events.onPlaybackChange?.(false);

@@ -107,6 +107,24 @@ server_vad 模式下 `input_audio_buffer.append` 会自动触发大模型推理�
 ## 7. 开放问题（实测时确认）
 
 - [ ] 短时 token（`issueToken('realtime')`）能否作为 query param 鉴权直连上游（官方无文档，默认走服务端代理）；
-- [ ] session 空闲多久被服务器关闭（实测后回填）；
-- [ ] `response.cancel` 在无响应时返回的 error 码形态（适配层需吞掉，不当失败上抛）；
-- [ ] StepFun TTS 的 `tts.response.subtitle` 词级时间戳（A7 口型升级项）字段形态，见 `tts` 通道文档。
+- [ ] session 空闲多久被服务器关闭。开发指南（2026-10-22 抓取）写明实时会话最长 30 分钟；空闲掐断仍未实测；
+- [x] `response.cancel` 在无响应时返回 `invalid_request_error`，message 为 `no ongoing response to cancel`。适配层按 message 含 cancel 吞掉，不当失败上抛。
+- [ ] StepFun TTS 的 `tts.response.subtitle` 词级时间戳（A7 口型升级项）字段形态，见 `tts` 通道文档；
+- [x] `stepaudio-3-realtime-preview` 的音色以 `voiceBinding.ts` 为准。2026-10-22 真 key：`soft-spoken-gentleman` 等 TTS 英文 id 返回 `request_params_invalid` / 400；角色卡里能直接播的中文 id 已改成原样使用。详见设计文档第 11 节。
+
+## 8. 多角色（2026-10）
+
+单条 Realtime 连接只能锁定一把 `voice`，且产出音频后不能再改。多角色不要在一条连接里换音色。
+架构、复刻音色扩展和降级见 [realtime-duplex-design.md](./realtime-duplex-design.md)。
+
+2026-10-22 带 key 复测后，默认音色映射已按握手结果改过，见设计文档第 11 节。代理必须按文本帧转发 JSON，否则 `session.update` 没有 `session.updated`。
+
+适配层分工：
+
+| 模块 | 职责 |
+|---|---|
+| `services/realtimeClient.ts` | 唯一允许出现 StepFun 事件名的地方。`channel=ear\|mouth\|duplex` |
+| `services/voiceBinding.ts` | `voice_id` / `realtime_voice_id` → `session.update.voice`。未知 ID 当复刻音色透传 |
+| `services/voiceLanes.ts` | 按音色去重的嘴会话池。每条分路一个 mouth 客户端，点名说话人后逐字播报 |
+| `services/realtimeVoiceRouter.ts` | 1 条耳 + VoiceLanePool。不解析事件名 |
+| `server/realtime-proxy.ts` | 每条浏览器 WS 单独持 key 连上游，纯透传 |

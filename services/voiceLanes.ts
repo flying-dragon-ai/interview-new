@@ -1,19 +1,23 @@
 /**
  * VoiceLanePool —— 按音色分路的 StepFun Realtime 播报池。
  *
- * 官方约束（platform.stepfun.com/docs/zh/api-reference/realtime/chat）：
- * session.update 除 voice 外可随时改；voice 只能在建会话时指定，之后不可更新。
- * 因此「不同的人、不同的音色」不能靠一条 WS 中途换 voice，必须一人一条锁定音色的连接。
+ * 官方约束：voice 只能在建会话时指定，之后不可更新。
+ * 不同的人、不同的音色不能靠一条连接中途换 voice，必须一把音色一条锁定的连接。
  *
- * 分工：
- * - 用户侧全双工（麦克风 / VAD / 转写 / 打断）仍由 RealtimeClient 一条耳朵连接负责。
- * - 本池只播报：不推麦克风，不开启 server_vad，避免分路自己开口回答。
- * - 后期音色克隆：把 create-voice 返回的 voice id 填进 RoleCard.voice.voice_id，
- *   本池原样写入建连时的 session.update.voice，不需要改协议。
+ * 本池是嘴会话的唯一登记处。RealtimeVoiceRouter 管耳会话和「哪个角色在说」，
+ * 播报交给这里。每条分路是一个 channel=mouth 的 RealtimeClient：
+ * 不推麦克风、不开启 VAD。协议与代理文本帧留在 RealtimeClient，
+ * 不再另养一条原始 WebSocket 栈。
+ *
+ * 复刻音色：把 create-voice 返回的 id 填进 RoleCard.voice.voice_id
+ * （或 realtime_voice_id）。调用方解析后放进 voices，本池原样锁定。
  */
 
-import { RealtimePlayback } from './realtimePlayback.ts';
-import type { WsLike } from './realtimeClient.ts';
+import {
+  RealtimeClient,
+  type RealtimeClientOptions,
+  type RealtimeEvents,
+} from './realtimeClient.ts';
 
 export interface LaneSpeakOptions {
   speakerName: string;
@@ -24,17 +28,23 @@ export interface LaneSpeakOptions {
 export interface VoiceLaneEvents {
   onPlaybackChange?(speaking: boolean, voiceId: string): void;
   onError?(e: { code: string; message: string; voiceId: string }): void;
+  onClose?(voiceId: string): void;
 }
 
 export interface VoiceLanePoolOptions {
   voices: string[];
   events?: VoiceLaneEvents;
+  /**
+   * 每条分路的建连。缺省为 RealtimeClient.create。
+   * 路由器传入会话的 createRealtimeClient，测试即可注入同一套 mock。
+   */
+  createClient?: (opts: RealtimeClientOptions) => Promise<RealtimeClient>;
   tokenUrl?: string;
-  /** 测试注入：已带 token 的 WS 地址，跳过凭证请求 */
+  /** 测试注入：已带 token 的 WS 地址，跳过默认地址拼接 */
   wsUrl?: string;
   fetchFn?: typeof fetch;
-  wsFactory?: (url: string) => WsLike;
-  playbackFactory?: () => Pick<RealtimePlayback, 'enqueue' | 'stop' | 'playing' | 'dispose' | 'getPlaybackAnalyser'>;
+  wsFactory?: RealtimeClientOptions['wsFactory'];
+  playbackFactory?: RealtimeClientOptions['playbackFactory'];
 }
 
 export class VoiceLaneUnavailableError extends Error {
@@ -54,244 +64,192 @@ export function buildLaneScript(speakerName: string, text: string, instruction?:
   );
 }
 
-interface LanePlayback {
-  enqueue(base64: string): void;
-  stop(): void;
-  readonly playing: boolean;
-  dispose(): void;
-  getPlaybackAnalyser(): AnalyserNode | null;
-}
-
-class VoiceLane {
-  readonly voiceId: string;
-  private ws: WsLike | null = null;
-  private readonly playback: LanePlayback;
-  private pending: { text: string; opts: LaneSpeakOptions }[] = [];
-  private opened = false;
-  private disposed = false;
-
-  constructor(
-    voiceId: string,
-    private readonly url: string,
-    private readonly events: VoiceLaneEvents,
-    private readonly wsFactory: (url: string) => WsLike,
-    playbackFactory: () => LanePlayback
-  ) {
-    this.voiceId = voiceId;
-    this.playback = playbackFactory();
-  }
-
-  start(): void {
-    if (this.disposed || this.ws) return;
-    const ws = this.wsFactory(this.url);
-    this.ws = ws;
-    ws.onopen = () => {
-      this.opened = true;
-      this.send({
-        type: 'session.update',
-        session: {
-          modalities: ['text', 'audio'],
-          instructions:
-            '你是面试室里一条已锁定音色的播报分路。不要自行回答用户，不要切换人设。' +
-            '只有收到以【台词播报】开头、且说话人与本分路一致的消息时，才逐字读出台词。',
-          voice: this.voiceId,
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-        },
-      });
-      const queued = this.pending.splice(0);
-      const last = queued[queued.length - 1];
-      if (last) this.emitSpeak(last.text, last.opts);
-    };
-    ws.onmessage = (ev) => this.onMessage(ev.data);
-    ws.onclose = () => {
-      this.opened = false;
-      if (!this.disposed) this.events.onError?.({ code: 'LANE_CLOSED', message: '音色分路断开', voiceId: this.voiceId });
-    };
-    ws.onerror = () => undefined;
-  }
-
-  speak(text: string, opts: LaneSpeakOptions): void {
-    if (this.disposed) return;
-    if (!this.opened) {
-      this.pending.push({ text, opts });
-      this.start();
-      return;
-    }
-    this.emitSpeak(text, opts);
-  }
-
-  cancel(): void {
-    this.pending = [];
-    if (this.opened) this.send({ type: 'response.cancel' });
-    this.playback.stop();
-    this.events.onPlaybackChange?.(false, this.voiceId);
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    this.cancel();
-    try {
-      this.ws?.close();
-    } catch {
-      // 忽略
-    }
-    this.ws = null;
-    this.playback.dispose();
-  }
-
-  get analyser(): AnalyserNode | null {
-    return this.playback.getPlaybackAnalyser();
-  }
-
-  private emitSpeak(text: string, opts: LaneSpeakOptions): void {
-    this.send({ type: 'response.cancel' });
-    this.send({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: buildLaneScript(opts.speakerName, text, opts.instruction) }],
-      },
-    });
-    this.send({ type: 'response.create' });
-  }
-
-  private onMessage(data: unknown): void {
-    let msg: { type?: string; delta?: string; error?: { type?: string; message?: string } };
-    try {
-      msg = JSON.parse(String(data));
-    } catch {
-      return;
-    }
-    switch (msg.type) {
-      case 'response.audio.delta':
-        if (msg.delta) {
-          this.playback.enqueue(msg.delta);
-          this.events.onPlaybackChange?.(true, this.voiceId);
-        }
-        break;
-      case 'response.done':
-      case 'response.audio.done':
-        if (!this.playback.playing) this.events.onPlaybackChange?.(false, this.voiceId);
-        break;
-      case 'error': {
-        const code = msg.error?.type ?? 'LANE_ERROR';
-        if (/cancel/i.test(msg.error?.message ?? '') || code === 'invalid_request_error') return;
-        this.events.onError?.({ code, message: msg.error?.message ?? '分路上游错误', voiceId: this.voiceId });
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  private send(obj: Record<string, unknown>): void {
-    if (this.ws && this.ws.readyState === 1) {
-      try {
-        this.ws.send(JSON.stringify(obj));
-      } catch {
-        // 发送失败由 onclose 上报
-      }
-    }
-  }
+interface Lane {
+  client: RealtimeClient;
+  pending: { text: string; opts: LaneSpeakOptions } | null;
 }
 
 export class VoiceLanePool {
   static async create(opts: VoiceLanePoolOptions): Promise<VoiceLanePool> {
     const voices = [...new Set(opts.voices.map((v) => v.trim()).filter(Boolean))];
     if (voices.length === 0) throw new VoiceLaneUnavailableError('没有可锁定的音色');
-    const url = opts.wsUrl ?? (await fetchLaneUrl(opts.fetchFn ?? fetch, opts.tokenUrl ?? '/api/realtime-token'));
-    return new VoiceLanePool(voices, url, opts);
+    const pool = new VoiceLanePool(opts);
+    await pool.open(voices);
+    return pool;
   }
 
-  private readonly lanes = new Map<string, VoiceLane>();
+  private readonly lanes = new Map<string, Lane>();
   private activeVoiceId: string | null = null;
+  private disposed = false;
+  private readonly events: VoiceLaneEvents;
+  private readonly createClient: (opts: RealtimeClientOptions) => Promise<RealtimeClient>;
 
-  private constructor(voices: string[], url: string, opts: VoiceLanePoolOptions) {
-    const wsFactory = opts.wsFactory ?? ((u: string) => new WebSocket(u) as unknown as WsLike);
-    const playbackFactory =
-      opts.playbackFactory ??
-      (() => {
-        const playback = new RealtimePlayback();
-        return {
-          enqueue: (b: string) => playback.enqueue(b),
-          stop: () => playback.stop(),
-          get playing() {
-            return playback.playing;
-          },
-          dispose: () => playback.dispose(),
-          getPlaybackAnalyser: () => playback.getPlaybackAnalyser(),
-        };
-      });
-    const events = opts.events ?? {};
-    for (const voiceId of voices) {
-      const lane = new VoiceLane(voiceId, url, {
-        onPlaybackChange: (speaking, id) => {
-          if (speaking) this.activeVoiceId = id;
-          else if (this.activeVoiceId !== id) return;
-          else this.activeVoiceId = null;
-          events.onPlaybackChange?.(speaking, id);
-        },
-        onError: (e) => events.onError?.(e),
-      }, wsFactory, playbackFactory);
-      lane.start();
-      this.lanes.set(voiceId, lane);
-    }
+  private constructor(opts: VoiceLanePoolOptions) {
+    this.events = opts.events ?? {};
+    const injected = opts.createClient;
+    this.createClient =
+      injected ??
+      ((clientOpts) =>
+        RealtimeClient.create({
+          ...clientOpts,
+          tokenUrl: opts.tokenUrl,
+          wsUrl: opts.wsUrl,
+          fetchFn: opts.fetchFn,
+          wsFactory: opts.wsFactory,
+          playbackFactory: opts.playbackFactory,
+        }));
+  }
+
+  get size(): number {
+    return this.lanes.size;
   }
 
   has(voiceId: string): boolean {
     return this.lanes.has(voiceId);
   }
 
+  start(): void {
+    for (const lane of this.lanes.values()) lane.client.start();
+  }
+
   /**
-   * 把台词送到该音色的分路。未知音色返回 false，调用方退回按 voice_id 的 TTS。
+   * 把台词送到该音色的分路。未知音色、或分路已关闭，返回 false，调用方退回 TTS。
    * 开播前取消其他分路，保证同一时刻只有一个说话人出声。
+   * 分路还在握手时先排队，open 后补发最后一句。
    */
   speak(voiceId: string, text: string, opts: LaneSpeakOptions): boolean {
+    if (this.disposed) return false;
     const line = text.trim();
     const lane = this.lanes.get(voiceId);
     if (!line || !lane) return false;
+    const state = lane.client.state;
+    if (state === 'closed' || state === 'error') return false;
     for (const [id, other] of this.lanes) {
-      if (id !== voiceId) other.cancel();
+      if (id === voiceId) continue;
+      other.pending = null;
+      other.client.stopAISpeech();
     }
     this.activeVoiceId = voiceId;
-    lane.speak(line, opts);
+    if (state !== 'open') {
+      lane.pending = { text: line, opts };
+      return true;
+    }
+    lane.pending = null;
+    this.emit(lane, line, opts);
     return true;
   }
 
   cancelAll(): void {
-    for (const lane of this.lanes.values()) lane.cancel();
+    for (const lane of this.lanes.values()) {
+      lane.pending = null;
+      lane.client.stopAISpeech();
+    }
     this.activeVoiceId = null;
+  }
+
+  /** 丢掉尚未发出的排队台词，不打断已经在播的音频。 */
+  releasePending(voiceId: string): void {
+    const lane = this.lanes.get(voiceId);
+    if (lane) lane.pending = null;
+  }
+
+  /** 有排队台词，或任一播放器仍在出声 */
+  isPlaying(): boolean {
+    for (const lane of this.lanes.values()) {
+      if (lane.pending || lane.client.isAIPlaying()) return true;
+    }
+    return false;
   }
 
   getPlaybackAnalyser(): AnalyserNode | null {
     if (!this.activeVoiceId) return null;
-    return this.lanes.get(this.activeVoiceId)?.analyser ?? null;
+    return this.lanes.get(this.activeVoiceId)?.client.getPlaybackAnalyser() ?? null;
+  }
+
+  drop(voiceId: string): void {
+    const lane = this.lanes.get(voiceId);
+    if (!lane) return;
+    this.lanes.delete(voiceId);
+    lane.pending = null;
+    if (this.activeVoiceId === voiceId) this.activeVoiceId = null;
+    lane.client.dispose();
   }
 
   dispose(): void {
-    for (const lane of this.lanes.values()) lane.dispose();
-    this.lanes.clear();
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const voiceId of [...this.lanes.keys()]) this.drop(voiceId);
     this.activeVoiceId = null;
   }
-}
 
-async function fetchLaneUrl(fetchFn: typeof fetch, tokenUrl: string): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetchFn(tokenUrl, { method: 'POST' });
-  } catch (err) {
-    throw new VoiceLaneUnavailableError(`realtime-token 请求失败: ${err instanceof Error ? err.message : String(err)}`);
+  private async open(voices: string[]): Promise<void> {
+    const opened = await Promise.all(
+      voices.map(async (voiceId) => {
+        try {
+          const client = await this.createClient({
+            channel: 'mouth',
+            voice: voiceId,
+            events: this.laneEvents(voiceId),
+          });
+          return { voiceId, client };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.events.onError?.({ code: 'LANE_UNAVAILABLE', message, voiceId });
+          return null;
+        }
+      })
+    );
+    for (const item of opened) {
+      if (!item) continue;
+      if (this.disposed) {
+        item.client.dispose();
+        continue;
+      }
+      this.lanes.set(item.voiceId, { client: item.client, pending: null });
+    }
   }
-  if (!res.ok) throw new VoiceLaneUnavailableError(`realtime-token HTTP ${res.status}`);
-  const cfg = (await res.json()) as { token?: string };
-  if (!cfg.token) throw new VoiceLaneUnavailableError('realtime-token 缺少 token');
-  return defaultLaneUrl(cfg.token);
-}
 
-function defaultLaneUrl(token: string): string {
-  if (typeof window === 'undefined') return `/api/realtime?token=${encodeURIComponent(token)}`;
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.host}/api/realtime?token=${encodeURIComponent(token)}`;
+  private laneEvents(voiceId: string): RealtimeEvents {
+    return {
+      onVadStart: () => undefined,
+      onVadStop: () => undefined,
+      onUserTranscript: () => undefined,
+      onOpen: () => this.flush(voiceId),
+      onPlaybackChange: (speaking) => {
+        if (this.activeVoiceId !== voiceId) return;
+        this.events.onPlaybackChange?.(speaking, voiceId);
+      },
+      onError: (e) => {
+        this.forget(voiceId);
+        this.events.onError?.({ code: e.code, message: e.message, voiceId });
+      },
+      onClose: () => {
+        if (!this.lanes.has(voiceId)) return;
+        this.forget(voiceId);
+        this.events.onClose?.(voiceId);
+      },
+    };
+  }
+
+  /** 从池中摘掉分路并断开。先摘再断，避免断开回调把同一条分路处理两次。 */
+  private forget(voiceId: string): void {
+    const lane = this.lanes.get(voiceId);
+    if (!lane) return;
+    this.lanes.delete(voiceId);
+    lane.pending = null;
+    if (this.activeVoiceId === voiceId) this.activeVoiceId = null;
+    lane.client.dispose();
+  }
+
+  private flush(voiceId: string): void {
+    const lane = this.lanes.get(voiceId);
+    if (!lane?.pending || lane.client.state !== 'open') return;
+    const pending = lane.pending;
+    lane.pending = null;
+    this.emit(lane, pending.text, pending.opts);
+  }
+
+  private emit(lane: Lane, text: string, opts: LaneSpeakOptions): void {
+    lane.client.speak(buildLaneScript(opts.speakerName, text, opts.instruction), 'verbatim');
+  }
 }
