@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { generateTopicStream } from '../services/geminiService';
 import { ROLE_CARDS, inferIndustry, cardDisplayRole } from '../data/roleCards';
 import { findAvatarPreset } from '../data/avatars';
-import { autoSelectRoles, validatePanelSelection, validateSelection, resolveRoleCards } from '../engine/roleSelector';
+import { autoSelectPanel, autoSelectRoles, validatePanelSelection, validateSelection, resolveRoleCards } from '../engine/roleSelector';
 import { TOPIC_TYPES } from '../constants';
-import type { InterviewFormat, RoleCard } from '../types';
+import { DEFAULT_PANEL_SIZE, type InterviewFormat, type PanelSize, type RoleCard } from '../types';
 /**
  * 准备页（PRD 4.1.2 / 5.2）
  * 公司/岗位 → 阵型 → 题型 → 形象（12 角色卡抽 3）→ 生成题目 → 设备检测 → 房间。
@@ -32,25 +32,40 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   const [jobTitle, setJobTitle] = useState('');
   const [company, setCompany] = useState('');
   const [topicType, setTopicType] = useState<string>('business_case');
-  /** 群面阵型：lgd = 1 面试官 + 4 候选人（含我）；panel = 3 面试官 + 1 候选人（我） */
+  /** 群面阵型：lgd = 主持 + 3 位 AI 候选人 + 我；panel = 2 或 3 位面试官 + 我 */
   const [format, setFormat] = useState<InterviewFormat>('lgd');
+  /** 结构化单面面试官人数。需求里同时写过 2 和 3，默认 3。 */
+  const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_PANEL_SIZE);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const roleCap = format === 'panel' ? panelSize : 3;
   const selectedCards = resolveRoleCards(selectedIds);
-  const violations = format === 'panel' ? validatePanelSelection(selectedCards) : validateSelection(selectedCards);
+  const violations = format === 'panel' ? validatePanelSelection(selectedCards, panelSize) : validateSelection(selectedCards);
+
+  const applyFormat = (next: InterviewFormat) => {
+    setFormat(next);
+    const cap = next === 'panel' ? panelSize : 3;
+    setSelectedIds((prev) => prev.slice(0, cap));
+  };
+
+  const applyPanelSize = (next: PanelSize) => {
+    setPanelSize(next);
+    setSelectedIds((prev) => prev.slice(0, next));
+  };
 
   const toggleCard = (id: string) => {
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 3) return prev; // 最多 3 张
+      if (prev.length >= roleCap) return prev;
       return [...prev, id];
     });
   };
 
   const handleAutoSelect = () => {
     const industry = inferIndustry(jobTitle || company);
-    const cards = autoSelectRoles(industry, Date.now() % 100000);
+    const seed = Date.now() % 100000;
+    const cards = format === 'panel' ? autoSelectPanel(industry, seed, panelSize) : autoSelectRoles(industry, seed);
     setSelectedIds(cards.map((c) => c.id));
   };
 
@@ -75,8 +90,12 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!topic || !jobTitle || !company) return;
-    if (selectedCards.length !== 3) {
-      alert(format === 'panel' ? '请选择 3 个面试官角色（或点击随机分配）' : '请选择 3 个候选人角色（或点击随机分配）');
+    if (selectedCards.length !== roleCap) {
+      alert(
+        format === 'panel'
+          ? `请选择 ${panelSize} 个面试官角色（或点击随机分配）`
+          : '请选择 3 个候选人角色（或点击随机分配）'
+      );
       return;
     }
     if (violations.length > 0) {
@@ -146,32 +165,52 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setFormat('lgd')}
+              onClick={() => applyFormat('lgd')}
               className={`glass-card p-4 text-left ${format === 'lgd' ? 'glass-selected' : ''}`}
             >
-              <div className="text-sm font-bold text-white">1 面试官 + 4 候选人（含我）</div>
+              <div className="text-sm font-bold text-white">无领导小组讨论</div>
               <div className="text-[11px] text-white/50 mt-1 leading-relaxed">
-                无领导小组讨论：3 位 AI 候选人与你同场竞技，1 位主持面试官控场（审题 → 个人陈述 → 自由讨论 → 总结）
+                1 位主持面试官控场（审题 → 个人陈述 → 自由讨论 → 总结），3 位 AI 候选人与你同场，共 4 位候选人
               </div>
             </button>
             <button
               type="button"
-              onClick={() => setFormat('panel')}
+              onClick={() => applyFormat('panel')}
               className={`glass-card p-4 text-left ${format === 'panel' ? 'glass-selected' : ''}`}
             >
-              <div className="text-sm font-bold text-white">3 面试官 + 1 候选人（我）</div>
+              <div className="text-sm font-bold text-white">结构化单面</div>
               <div className="text-[11px] text-white/50 mt-1 leading-relaxed">
-                结构化单面：3 位面试官轮流提问、追问深挖，你是唯一候选人，全程应答
+                多位 AI 面试官轮流提问、追问，你是唯一候选人。面试官人数可选 2 或 3，默认 3
               </div>
             </button>
           </div>
+          {format === 'panel' && (
+            <div className="mt-3">
+              <div className="text-[11px] font-semibold text-white/50 mb-2">面试官人数</div>
+              <div className="flex gap-2">
+                {([2, 3] as const).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => applyPanelSize(n)}
+                    className={`glass-btn-ghost text-xs px-3 py-1.5 ${panelSize === n ? 'glass-selected' : ''}`}
+                  >
+                    {n} 位{n === DEFAULT_PANEL_SIZE ? '（默认）' : ''}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-white/40 leading-relaxed">
+                需求里同时出现过「2 位面试官」和「3 位面试官」。这里做成可配置，默认 3 位，开场前可以改成 2 位。
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 角色选择（12 角色卡抽 3）：Bento 玻璃卡网格 */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-semibold text-white/60">
-              {format === 'panel' ? '选择面试官形象' : '选择候选人形象'}（<span className="tabular-nums">{selectedIds.length}</span>/3）
+              {format === 'panel' ? '选择面试官形象' : '选择候选人形象'}（<span className="tabular-nums">{selectedIds.length}</span>/{roleCap}）
             </label>
             <button
               type="button"
@@ -208,7 +247,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
               ))}
             </div>
           )}
-          {selectedIds.length === 3 && violations.length === 0 && (
+          {selectedIds.length === roleCap && violations.length === 0 && (
             <div className="mt-2 text-xs text-emerald-300/80">
               {format === 'panel' ? '✅ 组合满足约束：音色/形象不重复' : '✅ 组合满足约束：音色/形象/策略不重复，性格互补'}
             </div>
@@ -254,7 +293,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           /* 主 CTA：液态折射层 + 品牌渐变微光，尺寸大一个量级 */
           <button
             type="submit"
-            disabled={selectedCards.length !== 3 || violations.length > 0}
+            disabled={selectedCards.length !== roleCap || violations.length > 0}
             className="liquid glass-btn-primary w-full py-5 text-lg font-bold"
           >
             <span className="liquid-content">开始设备检测</span>

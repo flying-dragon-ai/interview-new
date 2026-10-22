@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { sanitizeCloseFrame } from '../server/realtime-proxy.ts';
+import { sanitizeCloseFrame, handleRealtimeUpgrade } from '../server/realtime-proxy.ts';
+import { issueToken } from '../api/_lib/stepfun.ts';
 
 /**
  * fix bug 回归：realtime-proxy 上游异常断开（close code=1006 保留值）导致
@@ -92,4 +94,90 @@ test('接线护栏：上游 close 经 sanitizeCloseFrame，handler 经 safeHandl
   );
   // 关键 close 分支带 readyState 守卫
   assert.ok(/client\.readyState !== client\.OPEN && client\.readyState !== client\.CLOSING/.test(src), 'close 转发缺 readyState 守卫');
+  // 文本帧必须带着 isBinary 转发。ws 把文本帧的 data 做成 Buffer，裸 send(Buffer) 会变成二进制，上游丢弃 JSON。
+  assert.ok(/forwardFrame\(upstream,\s*pending,\s*data,\s*isBinary\)/.test(src), '客户端帧未按 isBinary 转发');
+  assert.ok(/upstream http/.test(src), '上游握手失败时应带上 HTTP 状态');
+});
+
+test('代理把文本 JSON 当文本帧转发，二进制帧保持二进制', async () => {
+  const prev = process.env.STEPFUN_API_KEY;
+  process.env.STEPFUN_API_KEY = 'unit-test-stepfun-key';
+  const upstream = new WebSocketServer({ port: 0 });
+  await new Promise((r) => upstream.once('listening', r));
+  const upPort = (upstream.address() as { port: number }).port;
+  const received: { binary: boolean; text: string }[] = [];
+  const got = new Promise<void>((resolve) => {
+    upstream.on('connection', (ws) => {
+      ws.on('message', (data, isBinary) => {
+        received.push({ binary: isBinary, text: isBinary ? '' : data.toString() });
+        if (received.length >= 2) resolve();
+      });
+    });
+  });
+  const httpServer = createServer();
+  httpServer.on('upgrade', (req, socket, head) => {
+    handleRealtimeUpgrade(req, socket, head, { endpoint: `ws://127.0.0.1:${upPort}` });
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', () => resolve()));
+  const port = (httpServer.address() as { port: number }).port;
+  try {
+    const { token } = issueToken('realtime');
+    const client = new WebSocket(`ws://127.0.0.1:${port}/api/realtime?token=${encodeURIComponent(token)}`);
+    await new Promise((resolve) => client.once('open', resolve));
+    client.send(JSON.stringify({ type: 'session.update', session: { voice: 'unit' } }));
+    client.send(Buffer.from([0, 1, 2, 3]));
+    await Promise.race([
+      got,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('upstream did not receive frames')), 3000)),
+    ]);
+    assert.equal(received[0].binary, false);
+    assert.equal(JSON.parse(received[0].text).type, 'session.update');
+    assert.equal(received[1].binary, true);
+    client.close();
+  } finally {
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    if (prev === undefined) delete process.env.STEPFUN_API_KEY;
+    else process.env.STEPFUN_API_KEY = prev;
+  }
+});
+
+test('上游握手 429 时关掉浏览器连接，并带上状态码', async () => {
+  const prev = process.env.STEPFUN_API_KEY;
+  process.env.STEPFUN_API_KEY = 'unit-test-stepfun-key';
+  const upstream = createServer((_req, res) => {
+    res.statusCode = 429;
+    res.end();
+  });
+  upstream.on('upgrade', (_req, socket) => {
+    socket.write('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    socket.end();
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', () => resolve()));
+  const upPort = (upstream.address() as { port: number }).port;
+  const httpServer = createServer();
+  httpServer.on('upgrade', (req, socket, head) => {
+    handleRealtimeUpgrade(req, socket, head, { endpoint: `ws://127.0.0.1:${upPort}` });
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', () => resolve()));
+  const port = (httpServer.address() as { port: number }).port;
+  try {
+    const { token } = issueToken('realtime');
+    const client = new WebSocket(`ws://127.0.0.1:${port}/api/realtime?token=${encodeURIComponent(token)}`);
+    const closed = await new Promise<{ code: number; reason: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('client did not close')), 3000);
+      client.on('close', (code, reason) => {
+        clearTimeout(timer);
+        resolve({ code, reason: reason.toString() });
+      });
+      client.on('error', () => undefined);
+    });
+    assert.equal(closed.code, 1011);
+    assert.match(closed.reason, /upstream http 429/);
+  } finally {
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    if (prev === undefined) delete process.env.STEPFUN_API_KEY;
+    else process.env.STEPFUN_API_KEY = prev;
+  }
 });

@@ -143,8 +143,9 @@ test('Realtime 接线：建链成功 → active；最终转写落 user/realtime 
   const fakeClient = { start: () => undefined, stop: () => undefined, dispose: () => undefined, setMuted: () => undefined, state: 'open' };
   const c = new SessionController(
     makeDeps({
-      createRealtimeClient: (async (opts: { events: typeof captured }) => {
-        captured = opts.events;
+      createRealtimeClient: (async (opts: { channel?: string; events: typeof captured }) => {
+        // 耳会话才承载用户转写；嘴会话是按音色分开的播报通道
+        if (!opts.channel || opts.channel === 'ear') captured = opts.events;
         return fakeClient;
       }) as unknown as SessionDeps['createRealtimeClient'],
     })

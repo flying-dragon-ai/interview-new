@@ -54,7 +54,36 @@ function safeHandler(fn: (...args: any[]) => void): (...args: any[]) => void {
 
 const wss = new WebSocketServer({ noServer: true });
 
-export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+type PendingFrame = { data: Buffer | ArrayBuffer | Buffer[] | string; binary: boolean };
+
+/**
+ * 浏览器文本帧到达 `ws` 时 data 往往已是 Buffer，但 isBinary=false。
+ * 若按 Buffer 默认当二进制转发，上游会丢掉 JSON 事件（session.update 永远没有 session.updated）。
+ * 必须带上原始帧类型；上游还没 open 时先排队，open 时按原类型冲刷。
+ */
+function forwardFrame(
+  upstream: UpstreamWebSocket,
+  pending: PendingFrame[],
+  data: PendingFrame['data'],
+  binary: boolean
+): void {
+  if (upstream.readyState === UpstreamWebSocket.OPEN) upstream.send(data, { binary });
+  else pending.push({ data, binary });
+}
+
+function flushPending(upstream: UpstreamWebSocket, pending: PendingFrame[]): void {
+  while (pending.length > 0) {
+    const frame = pending.shift()!;
+    upstream.send(frame.data, { binary: frame.binary });
+  }
+}
+
+export function handleRealtimeUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  options?: { endpoint?: string }
+): void {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const token = url.searchParams.get('token') ?? '';
 
@@ -72,12 +101,16 @@ export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head
     return;
   }
 
-  const upstream = new UpstreamWebSocket(STEPFUN_CONFIG.realtime.endpoint + `?model=${STEPFUN_CONFIG.realtime.model}`, {
+  const endpoint =
+    options?.endpoint ??
+    STEPFUN_CONFIG.realtime.endpoint + `?model=${STEPFUN_CONFIG.realtime.model}`;
+  const upstream = new UpstreamWebSocket(endpoint, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
 
   wss.handleUpgrade(req, socket, head, (client) => {
-    // 上游 → 客户端
+    const pending: PendingFrame[] = [];
+    // 上游 → 客户端（保留文本/二进制）
     upstream.on(
       'message',
       safeHandler((data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
@@ -94,6 +127,25 @@ export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head
         client.close(frame.code, frame.reason);
       })
     );
+    // ws 在有 unexpected-response 监听器时不会再 emit error（见 ws/lib/websocket.js）。
+    // 第 6 条并发被拒时上游直接回 HTTP 429，必须在这里关掉浏览器侧，否则连接会挂住。
+    // 只写入状态码，不读 body，避免把密钥带出来。
+    upstream.on(
+      'unexpected-response',
+      safeHandler((_req: IncomingMessage, res: IncomingMessage & { resume?: () => void }) => {
+        const status = typeof res.statusCode === 'number' ? res.statusCode : undefined;
+        if (status) console.warn(`[realtime-proxy] upstream handshake HTTP ${status}`);
+        res.resume?.();
+        try {
+          upstream.terminate();
+        } catch {
+          // 忽略
+        }
+        if (client.readyState === client.OPEN) {
+          client.close(1011, status ? `upstream http ${status}` : 'upstream error');
+        }
+      })
+    );
     upstream.on(
       'error',
       safeHandler(() => {
@@ -101,19 +153,18 @@ export function handleRealtimeUpgrade(req: IncomingMessage, socket: Duplex, head
       })
     );
 
-    // 客户端 → 上游（缓冲到上游 open，避免建连竞态丢帧）
-    const pending: (string | Buffer)[] = [];
+    // 客户端 → 上游（缓冲到上游 open，避免建连竞态丢帧；文本帧不能改成二进制）
     upstream.on(
       'open',
       safeHandler(() => {
-        while (pending.length > 0) upstream.send(pending.shift()!);
+        flushPending(upstream, pending);
       })
     );
+    if (upstream.readyState === UpstreamWebSocket.OPEN) flushPending(upstream, pending);
     client.on(
       'message',
-      safeHandler((data: Buffer | string) => {
-        if (upstream.readyState === UpstreamWebSocket.OPEN) upstream.send(data);
-        else pending.push(data);
+      safeHandler((data: Buffer | string, isBinary: boolean) => {
+        forwardFrame(upstream, pending, data, isBinary);
       })
     );
     client.on(

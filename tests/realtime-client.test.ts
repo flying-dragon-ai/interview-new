@@ -180,6 +180,25 @@ test('冷却期：onVadStart 后 cooldownMs 内第二次 speech_started 被忽�
   h.client.dispose();
 });
 
+test('耳会话在 response.created 时再取消；嘴会话不取消', async () => {
+  const ear = await makeClient({ channel: 'ear' });
+  ear.client.start();
+  ear.sockets[0].open();
+  await sleep(5);
+  const before = ear.sockets[0].sentJson().filter((m) => m.type === 'response.cancel').length;
+  ear.sockets[0].emit({ type: 'response.created' });
+  assert.equal(ear.sockets[0].sentJson().filter((m) => m.type === 'response.cancel').length, before + 1);
+  ear.client.dispose();
+
+  const mouth = await makeClient({ channel: 'mouth', voice: 'zhengpaiqingnian' });
+  mouth.client.start();
+  mouth.sockets[0].open();
+  await sleep(5);
+  mouth.sockets[0].emit({ type: 'response.created' });
+  assert.equal(mouth.sockets[0].sentJson().filter((m) => m.type === 'response.cancel').length, 0);
+  mouth.client.dispose();
+});
+
 test('转写：completed → onUserTranscript(isFinal=true)；response.* 全部忽略', async () => {
   const h = await makeClient();
   h.client.start();
@@ -253,8 +272,9 @@ test('上游 error 事件：response.cancel 噪音吞掉；server_error 上抛 o
   h.client.start();
   h.sockets[0].open();
   await sleep(5);
-  h.sockets[0].emit({ type: 'error', error: { type: 'invalid_request_error', message: 'response.cancel: no active response' } });
+  h.sockets[0].emit({ type: 'error', error: { type: 'invalid_request_error', message: 'no ongoing response to cancel' } });
+  h.sockets[0].emit({ type: 'error', error: { type: 'request_params_invalid', code: '400', message: 'voice not-a-real-voice-zzz is not valid' } });
   h.sockets[0].emit({ type: 'error', error: { type: 'server_error', message: 'upstream boom' } });
-  assert.deepEqual(h.events.log, ['error:server_error']);
+  assert.deepEqual(h.events.log, ['error:request_params_invalid', 'error:server_error']);
   h.client.dispose();
 });

@@ -302,9 +302,13 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
             <span>
               语音输入：{realtimeActive ? 'StepFun Realtime 全双工' : voiceCaps?.inputMode === 'stepfun-asr' ? 'StepFun ASR（按键说话）' : voiceCaps?.inputMode === 'webspeech' ? '浏览器语音（兜底）' : '纯文字（降级）'}
               {' · '}
-              语音输出：{voiceCaps?.outputMode === 'stepfun-tts' ? 'StepFun TTS' : voiceCaps?.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）'}
+              语音输出：{realtimeActive ? '分角色 Realtime 音色' : voiceCaps?.outputMode === 'stepfun-tts' ? 'StepFun TTS' : voiceCaps?.outputMode === 'webspeech-tts' ? '浏览器语音（兜底）' : '纯文字（降级）'}
             </span>
-            <span className="hidden md:inline">发言权由调度器分配 · 倒计时到点强制切换阶段</span>
+            <span className="hidden md:inline">
+              {format === 'panel' ? `结构化单面 · ${roles.length} 位面试官` : '无领导小组讨论 · 主持控场'}
+              {' · '}
+              发言权由调度器分配 · 倒计时到点强制切换阶段
+            </span>
           </div>
           {snapshot.realtimeStatus === 'fallback' && (
             <div className="mt-1 text-center text-[10px] text-amber-300/80">实时语音不可用，已自动退回按键说话/文字输入</div>
