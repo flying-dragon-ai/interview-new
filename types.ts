@@ -24,9 +24,15 @@ export interface RolePersona {
   legacy_name?: string;
 }
 
-/** 角色卡 voice（附录 A.1，本期启用） */
+/**
+ * 角色卡 voice（附录 A.1）。
+ * voice_id 同时用于 StepFun TTS 与 Realtime 分路建连。
+ * 官方音色（如 shenchennanyin）和音色复刻返回的 voice id 都填这里；
+ * Realtime 的 voice 只能在建连时锁定，换音色 = 换一条分路，不能对已开的 session.update。
+ */
 export interface RoleVoice {
   provider: 'stepfun';
+  /** 官方音色 ID，或 https://platform.stepfun.com/docs/zh/api-reference/audio/create-voice 返回的复刻 voice id */
   voice_id: string;
   /** 语速倍率 */
   rate: number;

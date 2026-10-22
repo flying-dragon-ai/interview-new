@@ -28,6 +28,7 @@ import { generateAIReply, type ReplyParams, type ReplyResult } from '../../servi
 import { guidesToNextKeyPoint, proposesSummary } from '../../engine/discourseSignals.ts';
 import { VoiceService } from '../../services/voiceService.ts';
 import { RealtimeClient, type RealtimeClientOptions } from '../../services/realtimeClient.ts';
+import type { VoiceLanePool } from '../../services/voiceLanes.ts';
 import { HOST_CARD, isHostCard } from '../../data/interviewerCards.ts';
 import { saveMessage, saveEvents } from '../api.ts';
 import { VisionClient } from '../vision/visionClient.ts';
@@ -72,6 +73,11 @@ export interface SessionDeps {
   phaseDurationsMs?: Partial<Record<PhaseId, number>>;
   /** 测试注入：替换 Realtime 建链（默认 RealtimeClient.create） */
   createRealtimeClient?: (opts: RealtimeClientOptions) => Promise<RealtimeClient>;
+  /**
+   * 测试注入：替换音色分路池。
+   * 未注入且未替换 RealtimeClient 时，默认按本场角色卡各开一条锁定音色的播报连接。
+   */
+  createVoiceLanes?: (voices: string[]) => Promise<VoiceLanePool>;
 }
 
 function buildOpeningOrder(cards: RoleCard[], format: InterviewFormat): string[] {

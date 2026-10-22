@@ -150,7 +150,7 @@ export const AVATAR_PRESETS: AvatarPreset[] = [
     asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Host&backgroundColor=d1d4f9',
     viseme_asset_url: null,
     emotion_asset_url: null,
-    default_voice_id: 'shenchennanyin',
+    default_voice_id: 'linjiajiejie',
     tags: ['主持', '控场', '流程'],
   },
 ];
