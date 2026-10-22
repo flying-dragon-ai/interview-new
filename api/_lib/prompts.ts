@@ -2,6 +2,7 @@ import type { RoleCard } from '../../types';
 import { cardDisplayRole } from '../../data/roleCards.ts';
 import { USER_INFO } from '../../data/userInfo.ts';
 import { extractKeyPoints } from '../../engine/keyPoints.ts';
+import { guidesToNextKeyPoint, proposesSummary } from '../../engine/discourseSignals.ts';
 
 /**
  * 服务端 Prompt 资产（PRD 附录 F.0）
@@ -105,6 +106,8 @@ export interface ReplyPayload {
   voiceMode?: boolean;
   /** 当前阶段剩余毫秒（阶段紧急度提示） */
   phaseRemainingMs?: number;
+  /** 发言者身份：candidate=群面候选人（默认）；host=主持面试官（阵型 A）；interviewer=单面面试官（阵型 B） */
+  speakerKind?: 'candidate' | 'host' | 'interviewer';
 }
 
 /**
@@ -157,9 +160,7 @@ export function buildReplyPrompt(p: ReplyPayload): string {
 - 如果是前几个发言者，只能引用确实存在的、在你之前发言者的内容`;
   }
 
-  const hasSummaryGuidance = recentHistory.some(
-    (m) => (m.content.includes('总结') && m.content.includes('汇报')) || m.content.includes('谁来总结') || m.content.includes('谁愿意')
-  );
+  const hasSummaryGuidance = recentHistory.some((m) => proposesSummary(m.content));
 
   const hasTimeAllocation = recentHistory.some((m) => {
     const content = m.content;
@@ -218,13 +219,7 @@ export function buildReplyPrompt(p: ReplyPayload): string {
     (m) => m.content.includes('我来总结') || m.content.includes('我来汇报') || m.content.includes('我来说') || m.content.includes('我来')
   );
 
-  const hasGuidanceToNextPart = recentHistory.some((m) => {
-    const content = m.content;
-    return (
-      (content.includes('接下来') || content.includes('现在') || content.includes('应该') || content.includes('进入')) &&
-      (content.includes('讨论') || content.includes('规划') || content.includes('设计') || content.includes('分析') || content.includes('策略') || content.includes('方案') || content.includes('框架'))
-    );
-  });
+  const hasGuidanceToNextPart = recentHistory.some((m) => guidesToNextKeyPoint(m.content));
 
   const guidanceMessage = recentHistory
     .slice()
@@ -605,6 +600,74 @@ ${summaryControlHint}
   return prompt;
 }
 
+/**
+ * 主持面试官 prompt（阵型 A：1 面试官 + 4 候选人含我）。
+ * 只做流程控场：开场/环节切换/时间提醒/冷场邀请/总结引导，不发表业务观点。
+ */
+export function buildHostPrompt(p: ReplyPayload): string {
+  const { card, topic, jobTitle, history, phase } = p;
+  const recentHistory = history.slice(-6);
+  const phaseDirective = phase.includes('审题') || phase.includes('主持开场')
+    ? '欢迎候选人到场，简短介绍本场流程（先审题，再依次个人陈述，然后自由讨论，最后总结陈词），并宣布现在开始审题。'
+    : phase.includes('开局框架') || phase.includes('个人陈述')
+      ? '宣布个人陈述环节开始，说明每人约 1 分钟，邀请第一位候选人开始。'
+      : phase.includes('深入讨论')
+        ? '宣布进入自由讨论环节，提醒候选人围绕题目核心要点充分交锋，注意时间。'
+        : phase.includes('总结')
+          ? '提醒自由讨论时间结束，邀请候选人依次做总结陈词。'
+          : '做出一句简短的流程衔接台词。';
+  return `你是一场【${jobTitle}】岗位无领导小组讨论面试的主持面试官（${card.name}）。
+题目：${topic}
+
+最近对话：
+${recentHistory.length > 0 ? recentHistory.map((m) => `${m.senderName}: ${m.content}`).join('\n') : '（还没有人发言）'}
+
+当前阶段：${phase}
+任务：${phaseDirective}
+
+硬性规则：
+- 你只负责流程控场，不发表任何业务观点，不评价候选人观点优劣。
+- 台词 1-3 句、简洁自然；称呼候选人时使用名字。
+- 绝对禁止 Markdown 格式。
+
+【输出格式（必须严格遵守）】只输出一行 JSON，不要输出任何其他文字：
+{"content": "你的台词", "emotion": "neutral|positive|tense|serious", "target": null, "stepfun_tts_instruction": "语气指令，如：沉稳清晰"}`;
+}
+
+/**
+ * 单面面试官 prompt（阵型 B：3 面试官 + 1 候选人）。
+ * 结构化问答：每次只问一个问题或一句追问，基于候选人上一条回答推进。
+ */
+export function buildPanelInterviewerPrompt(p: ReplyPayload): string {
+  const { card, topic, jobTitle, history, phase } = p;
+  const recentHistory = history.slice(-8);
+  const interviewersNote = history.length <= 1
+    ? '这是面试开场，请先用一句话欢迎候选人并做简短自我介绍（你是谁、负责哪方面），然后提出你的第一个问题或请候选人自我介绍。'
+    : phase.includes('总结')
+      ? '面试进入收尾：感谢候选人的时间，给出一句简短中立的评价，并告知面试结束。不要再提新问题。'
+      : '请基于候选人上一条回答继续推进：优先追问深挖（具体做法/数据结果/取舍权衡/边界情况），或自然切换到你分工内的新话题。每次只问一个问题，不要连环发问，不要代替候选人回答。';
+  return `你是一场【${jobTitle}】岗位结构化面试的面试官之一（${card.name}）。
+你的面试官人设：${personaDescription(card)}
+本场候选人只有一位：${USER_INFO.name}。题目背景（用于出题方向）：${topic}
+
+最近对话：
+${recentHistory.length > 0 ? recentHistory.map((m) => `${m.senderName}: ${m.content}`).join('\n') : '（面试即将开始）'}
+
+当前阶段：${phase}
+
+任务：${interviewersNote}
+
+硬性规则：
+- 每次发言只包含一个问题或一句追问，控制在 80 字以内，口语自然。
+- 必须针对候选人（${USER_INFO.name}）最近的回答内容推进，不能自说自话。
+- 你是面试官：不回答问题，不替候选人总结，不与其他面试官互相捧场。
+- 绝对禁止 Markdown 格式。
+
+【输出格式（必须严格遵守）】只输出一行 JSON，不要输出任何其他文字：
+{"content": "你的提问或追问", "emotion": "neutral|positive|tense|serious", "target": "user", "stepfun_tts_instruction": "语气指令，如：专业、略带压迫感"}`;
+}
+
+
 /** 题目生成 prompt（原 generateTopic / generateTopicStream） */
 export function buildTopicPrompt(company: string, jobTitle: string): string {
   return `你是一位资深的${company}面试官，正在为${jobTitle}岗位设计群面题目。
@@ -676,4 +739,37 @@ export function formatTs(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** 旧 4 字段报告 prompt（PRD D.2：保留冗余展示；自 api/llm.ts 内联收口至此） */
+export function buildFeedbackPrompt(topic: string, jobTitle: string, history: HistoryItem[]): string {
+  return `作为专业面试官，请深度分析以下讨论中【用户】的表现。
+注意：只评价【用户】本人，绝对不要评价任何 AI 参与者的表现。
+岗位：${jobTitle}
+题目：${topic}
+全场对话记录（【用户】= 被评估者；【AI】前缀 = 其他参与者，仅供参考上下文）：
+${history.map((m) => `${m.senderId === 'user' ? `【用户】${m.senderName}` : `【AI】${m.senderName}`}：${m.content}`).join('\n')}
+
+评估维度：
+1. **发言质量**：分析用户观点是否切中题目核心要害，是否提供了独特的洞察。
+2. **结构贡献**：用户是否在确立框架、归纳共识、化解冲突上起到关键作用。
+3. **时机掌握**：是否在合适的时机切入，发言是否过于碎片化。
+4. **总结表现**：如果用户在最后阶段做了总结陈词，请给予高权重加分。
+5. **抗压能力**：在被抢话或质疑时的反应。
+
+请严格按以下 JSON 格式返回，不要包含任何其他文字或 Markdown 格式：
+{
+  "timing": "发言时机精准度分析（字符串）",
+  "voiceShare": 0,
+  "structuralContribution": "对讨论框架和进展的贡献评估（字符串）",
+  "interruptionHandling": "在冲突和高压下的表现（字符串）",
+  "overallScore": 0,
+  "suggestions": ["改进建议1", "改进建议2", "改进建议3"]
+}
+
+注意：
+- timing、structuralContribution、interruptionHandling 必须是字符串类型
+- overallScore 必须是 0-100 之间的数字
+- suggestions 必须是字符串数组，包含 3-5 条具体改进建议
+- voiceShare 字段会被系统自动计算，你可以忽略它`;
 }

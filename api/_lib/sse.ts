@@ -47,3 +47,30 @@ export function createSseWriter(res: {
   });
   return writer;
 }
+
+/** 读取上游 SSE 响应体，逐 data 行回调（/api/tts · /api/asr 代理共用）；[DONE] 与注释行跳过 */
+export async function pipeUpstreamSse(
+  body: ReadableStream<Uint8Array>,
+  onData: (payload: string) => void
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (!payload || payload === '[DONE]') continue;
+        onData(payload);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

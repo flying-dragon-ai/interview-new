@@ -1,5 +1,5 @@
 import type { Message, RoleCard, FeedbackData, ReportV15 } from '../types';
-
+import { readSseResponse } from './sse.ts';
 /**
  * LLM 服务客户端（PRD 4.1.1 / D1 修复）
  * 只调 /api/llm 服务端代理；本文件不包含任何 API key 处理逻辑。
@@ -7,6 +7,7 @@ import type { Message, RoleCard, FeedbackData, ReportV15 } from '../types';
  */
 
 const API_BASE = '/api';
+
 
 export interface ReplyResult {
   content: string;
@@ -30,6 +31,8 @@ export interface ReplyParams {
   currentKeyPointIndex?: number;
   /** 语音版：LLM 输出 JSON（emotion/instruction），用于 TTS 与形象表情 */
   voiceMode?: boolean;
+  /** 发言者身份：candidate/host/interviewer（服务端 prompt 分支） */
+  speakerKind?: 'candidate' | 'host' | 'interviewer';
   phaseRemainingMs?: number;
   sessionId?: number | null;
 }
@@ -61,42 +64,6 @@ async function postLlm<T>(body: Record<string, unknown>): Promise<LlmResponse<T>
 }
 
 /** 读取 SSE 流：onEvent(event, dataObj) */
-async function readSse(
-  res: Response,
-  onEvent: (event: string, data: Record<string, unknown>) => void,
-  signal?: AbortSignal
-): Promise<void> {
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('SSE 响应体不可读');
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() ?? '';
-      for (const block of blocks) {
-        if (!block.trim()) continue;
-        let event = 'message';
-        const dataLines: string[] = [];
-        for (const line of block.split('\n')) {
-          if (line.startsWith('event: ')) event = line.slice(7).trim();
-          else if (line.startsWith('data: ')) dataLines.push(line.slice(6));
-        }
-        if (dataLines.length === 0) continue;
-        try {
-          onEvent(event, JSON.parse(dataLines.join('\n')) as Record<string, unknown>);
-        } catch {
-          // 忽略单条解析失败
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 /** 流式生成群面题目（SSE 透传） */
 export async function generateTopicStream(
@@ -114,7 +81,7 @@ export async function generateTopicStream(
     throw new Error(`题目生成失败: ${res.status} ${text}`);
   }
   let full = '';
-  await readSse(res, (event, data) => {
+  await readSseResponse(res, (event, data) => {
     if (event === 'delta' && typeof data.delta === 'string') {
       full += data.delta;
       onChunk(data.delta);
@@ -146,6 +113,7 @@ export async function generateAIReply(
     allKeyPoints: params.allKeyPoints ?? [],
     currentKeyPointIndex: params.currentKeyPointIndex ?? 0,
     voiceMode: params.voiceMode ?? false,
+    speakerKind: params.speakerKind ?? 'candidate',
     phaseRemainingMs: params.phaseRemainingMs,
     session_id: params.sessionId ?? null,
   };
@@ -163,7 +131,7 @@ export async function generateAIReply(
     }
     let result: ReplyResult | null = null;
     let streamError: string | null = null;
-    await readSse(res, (event, data) => {
+    await readSseResponse(res, (event, data) => {
       if (event === 'delta' && typeof data.delta === 'string') {
         onDelta(data.delta);
       } else if (event === 'done') {
@@ -217,6 +185,8 @@ export async function generateReportV15(params: {
   events: import('../types').GameEvent[];
   sessionStartAt: number;
   durationMs: number;
+  /** 视觉聚合行（本地模式兜底路径也保留视觉维度；服务端路径走 DB） */
+  visualRows?: import('../types').VisualFeatureRow[];
   sessionId?: number | null;
 }): Promise<ReportV15> {
   const { ok, data, error } = await postLlm<ReportV15>({
@@ -228,6 +198,7 @@ export async function generateReportV15(params: {
       events: params.events,
       sessionStartAt: params.sessionStartAt,
       durationMs: params.durationMs,
+      visual_rows: params.visualRows ?? [],
       session_id: params.sessionId ?? null,
     },
     session_id: params.sessionId ?? null,

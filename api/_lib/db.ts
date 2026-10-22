@@ -27,7 +27,8 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
       ...(sslDisabled ? {} : { ssl: { rejectUnauthorized: false } }),
-      max: 5,
+      // serverless 每函数实例各持一个 pool：max 压低 + 建议生产挂 pgbouncer（transaction 模式）
+      max: 3,
       idleTimeoutMillis: 10_000,
       connectionTimeoutMillis: 5_000,
     });
@@ -40,7 +41,3 @@ export function setPoolForTesting(mock: Pool | null): void {
   pool = mock;
 }
 
-/** 供 serverless 复用连接（同一实例内） */
-export async function withDb<T>(fn: (pool: Pool) => Promise<T>): Promise<T> {
-  return fn(getPool());
-}

@@ -2,7 +2,7 @@ import type { GameEvent, PhaseDef, PhaseId } from '../types';
 
 /**
  * 真实计时四阶段引擎（PRD 4.1.3 / 附录 B.3）
- * 审题 2min → 个人陈述每人 1min → 自由讨论 ≤15min → 总结 3min
+ * 审题 10s → 个人陈述每人 1min → 自由讨论 ≤15min → 总结 3min
  * - 倒计时为阶段推进主信号；关键词检测降级为辅助/兜底（D4）
  * - 废弃 25 轮上限，改为时间盒；要点跟踪（每要点 10 次）保留
  */
@@ -12,7 +12,7 @@ export const PHASE_DEFS: PhaseDef[] = [
     id: 'READING',
     label: '审题',
     promptPhase: '审题阶段（阅读题目，暂不发言）',
-    durationMs: 2 * 60 * 1000,
+    durationMs: 10 * 1000,
     allowSpeech: false,
   },
   {

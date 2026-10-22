@@ -95,3 +95,62 @@ export function safeJsonParse<T>(text: string): T | null {
     return null;
   }
 }
+
+/**
+ * 增量式 JSON 字符串字段读取器（/api/llm reply 流式透传用）。
+ * 相比逐 chunk 重跑 extractJsonStringField(fullBuffer)：
+ * - key 定位一次后缓存游标（不再每 chunk 全量正则）；
+ * - 记录已发送长度，只返回新增增量；
+ * - flushTail() 在流结束后补齐未发送的剩余值。
+ */
+export interface IncrementalStringFieldReader {
+  /** 追加流片段；返回新暴露的增量（无新增为空串；key 未出现为 null） */
+  push(chunk: string): string | null;
+  /** 流结束：补发剩余未发送的值（无则空串） */
+  flushTail(): string;
+}
+
+export function createStringFieldReader(field: string): IncrementalStringFieldReader {
+  const keyPattern = new RegExp(`"${field}"\\s*:\\s*`);
+  let acc = '';
+  let searchFrom = 0;
+  let keyEnd = -1;
+  let sentLen = 0;
+  let valueDone = false;
+
+  const parseCurrent = (): { value: string; partial: boolean } | null => {
+    const parsed = parseJsonStringAt(acc, keyEnd);
+    if (!parsed) return null;
+    return { value: parsed.value, partial: Boolean(parsed.partial) };
+  };
+
+  return {
+    push(chunk) {
+      if (valueDone) return '';
+      acc += chunk;
+      if (keyEnd < 0) {
+        const m = keyPattern.exec(acc.slice(searchFrom));
+        if (!m) {
+          // 只回退一个 key 可能被截断的窗口，避免全量重扫
+          searchFrom = Math.max(0, acc.length - field.length - 16);
+          return null;
+        }
+        keyEnd = searchFrom + m.index + m[0].length;
+      }
+      const cur = parseCurrent();
+      if (!cur) return null;
+      const delta = cur.value.length > sentLen ? cur.value.slice(sentLen) : '';
+      sentLen = cur.value.length;
+      if (!cur.partial) valueDone = true;
+      return delta;
+    },
+    flushTail() {
+      if (keyEnd < 0 || valueDone) return '';
+      const cur = parseCurrent();
+      if (!cur) return '';
+      const tail = cur.value.slice(sentLen);
+      sentLen = cur.value.length;
+      return tail;
+    },
+  };
+}

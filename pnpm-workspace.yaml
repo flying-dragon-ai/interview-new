@@ -1,3 +1,9 @@
 allowBuilds:
   bufferutil: true
   esbuild: true
+  "@google/genai": true
+  "@reown/appkit": true
+  es5-ext: true
+  keccak: true
+  protobufjs: true
+  utf-8-validate: true

@@ -5,6 +5,8 @@ import type { AvatarPreset } from '../types';
  * P0 门槛：≥8 个预设、覆盖 ≥4 行业；本库 12 个、覆盖 8 行业。
  * - 静态图 + 说话高亮 + 音色绑定（PRD 4.1.8）
  * - viseme/emotion 资源为 P1（口型同步），当前为 null，前端降级为静态头像 + 高亮
+ * - 全部为 dicebear 风格化 SVG（原 M7 P3-4 VRM 绑定随沉浸 3D 模式删除）
+ *   纹理已就地转码 WebP ≤8MB）；null = 第三槽位待补资产，回落 DiceBear SVG 平面贴片
  * - 全部为风格化虚拟形象，不使用真实名人肖像/姓名（C7）
  */
 export const AVATAR_PRESETS: AvatarPreset[] = [
@@ -139,6 +141,17 @@ export const AVATAR_PRESETS: AvatarPreset[] = [
     emotion_asset_url: null,
     default_voice_id: 'stepfun_voice_02',
     tags: ['互联网', '逻辑', '追问'],
+  },
+  {
+    id: 'host_01',
+    name: '主持面试官',
+    industry: 'general',
+    type: 'preset',
+    asset_url: 'https://api.dicebear.com/7.x/notionists/svg?seed=Host&backgroundColor=d1d4f9',
+    viseme_asset_url: null,
+    emotion_asset_url: null,
+    default_voice_id: 'linjiajiejie',
+    tags: ['主持', '控场', '流程'],
   },
 ];
 

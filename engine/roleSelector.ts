@@ -1,5 +1,6 @@
-import type { RoleCard } from '../types';
+import type { PanelSize, RoleCard } from '../types';
 import { ROLE_CARDS } from '../data/roleCards.ts';
+import { resolveVoiceBinding } from '../services/voiceBinding.ts';
 
 /**
  * 每场 3 张角色卡分配（PRD 附录 A.3 / 4.1.8）
@@ -59,10 +60,7 @@ export function validateSelection(cards: RoleCard[]): SelectionViolation[] {
     violations.push({ rule: 'count', message: '每场必须选择 3 个角色' });
     return violations;
   }
-  const voices = cards.map((c) => c.voice.voice_id);
-  if (new Set(voices).size !== voices.length) {
-    violations.push({ rule: 'voice_unique', message: '3 个角色音色不能重复' });
-  }
+  pushVoiceViolations(cards, violations, '3 个角色');
   const avatars = cards.map((c) => c.avatar.preset_id);
   if (new Set(avatars).size !== avatars.length) {
     violations.push({ rule: 'avatar_unique', message: '3 个角色形象不能重复' });
@@ -81,6 +79,68 @@ export function validateSelection(cards: RoleCard[]): SelectionViolation[] {
     });
   }
   return violations;
+}
+
+/**
+ * 结构化单面面试官组合校验。
+ * 人数支持 2 或 3（默认 3；需求原文同时写过两种人数）。
+ * 不要求性格互补，保留音色/形象不重复。
+ * expected 传入时人数必须正好等于它（准备页按当前选择校验）。
+ */
+export function validatePanelSelection(cards: RoleCard[], expected?: PanelSize): SelectionViolation[] {
+  const violations: SelectionViolation[] = [];
+  if (cards.length !== 2 && cards.length !== 3) {
+    violations.push({ rule: 'count', message: '结构化单面需选择 2 或 3 位面试官（默认 3）' });
+    return violations;
+  }
+  if (expected !== undefined && cards.length !== expected) {
+    violations.push({ rule: 'count', message: `结构化单面需选择 ${expected} 位面试官` });
+    return violations;
+  }
+  pushVoiceViolations(cards, violations, '面试官');
+  const avatars = cards.map((c) => c.avatar.preset_id);
+  if (new Set(avatars).size !== avatars.length) {
+    violations.push({ rule: 'avatar_unique', message: '面试官形象不能重复' });
+  }
+  return violations;
+}
+
+function pushVoiceViolations(cards: RoleCard[], violations: SelectionViolation[], who: string): void {
+  const voices = cards.map((c) => c.voice.voice_id);
+  if (new Set(voices).size !== voices.length) {
+    violations.push({ rule: 'voice_unique', message: `${who}音色不能重复` });
+    return;
+  }
+  const heard = cards.map((c) => resolveVoiceBinding(c.voice).realtimeVoiceId);
+  if (new Set(heard).size !== heard.length) {
+    violations.push({
+      rule: 'realtime_voice_unique',
+      message: `${who}解析后的实时音色重复。换复刻音色时直接替换 voice id，并保证每人不同`,
+    });
+  }
+}
+
+/**
+ * 结构化单面自动分配。优先同行业，音色与形象不重复。
+ */
+export function autoSelectPanel(industry: string, seed: number, count: PanelSize = 3): RoleCard[] {
+  const rng = createRng(seed);
+  const pool = shuffle(ROLE_CARDS, rng);
+  const ordered = [...pool.filter((c) => c.industry === industry), ...pool.filter((c) => c.industry !== industry)];
+  const chosen: RoleCard[] = [];
+  const usedVoices = new Set<string>();
+  const usedAvatars = new Set<string>();
+  const usedHeard = new Set<string>();
+  for (const card of ordered) {
+    if (chosen.length >= count) break;
+    const heard = resolveVoiceBinding(card.voice).realtimeVoiceId;
+    if (usedVoices.has(card.voice.voice_id) || usedAvatars.has(card.avatar.preset_id) || usedHeard.has(heard)) continue;
+    chosen.push(card);
+    usedVoices.add(card.voice.voice_id);
+    usedAvatars.add(card.avatar.preset_id);
+    usedHeard.add(heard);
+  }
+  return chosen;
 }
 
 /**

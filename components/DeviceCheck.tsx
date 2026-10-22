@@ -173,98 +173,140 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
   const canEnter = micReady && consent && (cameraStatus !== 'pending' || !cameraEnabled);
 
   const statusIcon = (s: CheckStatus) =>
-    s === 'passed' ? '✅' : s === 'failed' ? '❌' : s === 'skipped' ? '⏭️' : s === 'checking' ? '⏳' : '⬜';
+    s === 'passed' ? (
+      <span className="glass-chip badge-success text-[10px] px-2 py-0.5">通过</span>
+    ) : s === 'failed' ? (
+      <span className="glass-chip badge-danger text-[10px] px-2 py-0.5">失败</span>
+    ) : s === 'skipped' ? (
+      <span className="glass-chip text-[10px] px-2 py-0.5 text-white/40">已跳过</span>
+    ) : s === 'checking' ? (
+      <span className="glass-chip text-[10px] px-2 py-0.5 text-white/60">
+        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4" fill="none" stroke="currentColor"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        检测中
+      </span>
+    ) : (
+      <span className="glass-chip text-[10px] px-2 py-0.5 text-white/30">等待</span>
+    );
 
+  // 步骤条行卡状态：当前检测项微放大 + 渐变描边；完成项沉降
+  const rowClass = (s: CheckStatus) =>
+    `glass-card p-4 flex items-center justify-between gap-3 transition-all duration-300 ${
+      s === 'checking' ? 'glass-selected scale-[1.01]' : s === 'passed' ? 'opacity-60' : ''
+    }`;
+
+  const stepNum = (n: number) => (
+    <span className="glass-chip w-7 h-7 justify-center text-[11px] tabular-nums text-white/50 shrink-0">{n}</span>
+  );
   return (
-    <div className="w-full max-w-2xl mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-      <div className="bg-slate-900 px-8 py-6">
-        <h1 className="text-2xl font-bold text-white">设备检测与准备</h1>
-        <p className="text-slate-300 text-sm mt-1">按提示逐项检测，随时可以跳过摄像头进入纯语音模式</p>
+    <div className="w-full max-w-2xl mx-auto glass-panel overflow-hidden">
+      {/* 头部（替换原实色块） */}
+      <div className="px-8 pt-10 pb-4 text-center">
+        <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">
+          设备<span className="text-gradient-brand">检测</span>与准备
+        </h1>
+        <p className="text-white/60 text-sm mt-3">按提示逐项检测，随时可以跳过摄像头进入纯语音模式</p>
       </div>
 
-      <div className="p-8 space-y-6">
-        {/* 麦克风 */}
-        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200">
-          <div>
-            <div className="font-semibold text-slate-800">🎤 麦克风 {statusIcon(micStatus)}</div>
-            <div className="text-xs text-slate-500 mt-1">
-              {micStatus === 'failed' ? '未获得麦克风权限，将使用纯文字模式' : '检测权限与输入音量'}
-            </div>
-            {micStatus === 'passed' && (
-              <div className="mt-2 h-2 w-48 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${micLevel}%` }} />
+      <div className="stagger px-8 pb-8 space-y-4">
+        {/* 步骤 1：麦克风 */}
+        <div className={rowClass(micStatus)}>
+          <div className="flex items-start gap-3">
+            {stepNum(1)}
+            <div>
+              <div className="font-semibold text-white flex items-center gap-2">🎤 麦克风 {statusIcon(micStatus)}</div>
+              <div className="text-xs text-white/60 mt-1">
+                {micStatus === 'failed' ? '未获得麦克风权限，将使用纯文字模式' : '检测权限与输入音量'}
               </div>
-            )}
+              {micStatus === 'passed' && (
+                <div className="mt-2 h-2 w-48 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${micLevel}%` }} />
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={startMicCheck}
             disabled={micStatus === 'checking' || micStatus === 'passed'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+            className="glass-btn px-4 py-2 text-sm font-medium shrink-0"
           >
             {micStatus === 'passed' ? '已通过' : '开始检测'}
           </button>
         </div>
 
-        {/* 摄像头 */}
-        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200">
-          <div className="flex-1">
-            <div className="font-semibold text-slate-800">📷 摄像头 {statusIcon(cameraStatus)}</div>
-            <div className="text-xs text-slate-500 mt-1">
-              {cameraStatus === 'skipped' ? '已跳过摄像头（纯语音模式）' : '检测权限与画面预览'}
+        {/* 步骤 2：摄像头 */}
+        <div className={rowClass(cameraStatus)}>
+          <div className="flex items-start gap-3 flex-1">
+            {stepNum(2)}
+            <div className="flex-1">
+              <div className="font-semibold text-white flex items-center gap-2">📷 摄像头 {statusIcon(cameraStatus)}</div>
+              <div className="text-xs text-white/60 mt-1">
+                {cameraStatus === 'skipped' ? '已跳过摄像头（纯语音模式）' : '检测权限与画面预览'}
+              </div>
+              {cameraStatus === 'passed' && (
+                /* 预览玻璃框：detected 后渐变描边 + 外发光 */
+                <div className="mt-3 inline-block rounded-3xl p-[2px] bg-gradient-to-br from-brand to-brand-soft shadow-[0_0_24px_rgba(91,108,255,0.40)]">
+                  <video ref={videoRef} muted playsInline className="w-40 h-28 bg-black rounded-[calc(1.5rem-2px)] object-cover" />
+                </div>
+              )}
             </div>
-            {cameraStatus === 'passed' && (
-              <video ref={videoRef} muted playsInline className="mt-2 w-40 h-28 bg-black rounded-lg object-cover" />
-            )}
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 shrink-0">
             <button
               onClick={() => startCameraCheck()}
               disabled={cameraStatus === 'checking' || !cameraEnabled}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+              className="glass-btn px-4 py-2 text-sm font-medium"
             >
               {cameraStatus === 'passed' ? '已通过' : '开始检测'}
             </button>
             {isMobile && cameraStatus === 'passed' && (
-              <button onClick={switchCamera} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm">
+              <button onClick={switchCamera} className="glass-btn-ghost px-4 py-2 text-sm">
                 切换{facingMode === 'user' ? '后置' : '前置'}
               </button>
             )}
-            <button onClick={skipCamera} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm hover:bg-slate-200">
+            <button onClick={skipCamera} className="glass-btn-ghost px-4 py-2 text-sm">
               跳过摄像头
             </button>
           </div>
         </div>
 
-        {/* 扬声器 */}
-        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200">
-          <div>
-            <div className="font-semibold text-slate-800">🔊 扬声器 {statusIcon(speakerStatus)}</div>
-            <div className="text-xs text-slate-500 mt-1">播放测试音，确认能听到 AI 发言</div>
+        {/* 步骤 3：扬声器 */}
+        <div className={rowClass(speakerStatus)}>
+          <div className="flex items-start gap-3">
+            {stepNum(3)}
+            <div>
+              <div className="font-semibold text-white flex items-center gap-2">🔊 扬声器 {statusIcon(speakerStatus)}</div>
+              <div className="text-xs text-white/60 mt-1">播放测试音，确认能听到 AI 发言</div>
+            </div>
           </div>
           <button
             onClick={playTestTone}
             disabled={speakerStatus === 'passed'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+            className="glass-btn px-4 py-2 text-sm font-medium shrink-0"
           >
             {speakerStatus === 'passed' ? '已通过' : '播放测试音'}
           </button>
         </div>
 
-        {/* 网络 */}
-        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200">
-          <div>
-            <div className="font-semibold text-slate-800">🌐 网络 {statusIcon(networkStatus)}</div>
-            <div className="text-xs text-slate-500 mt-1">{networkDetail || '检测连通性'}</div>
-            {networkStatus === 'failed' && <div className="text-xs text-amber-600 mt-1">弱网将自动降级为纯语音/纯文字模式</div>}
+        {/* 步骤 4：网络 */}
+        <div className={rowClass(networkStatus)}>
+          <div className="flex items-start gap-3">
+            {stepNum(4)}
+            <div>
+              <div className="font-semibold text-white flex items-center gap-2">🌐 网络 {statusIcon(networkStatus)}</div>
+              <div className="text-xs text-white/60 mt-1">{networkDetail || '检测连通性'}</div>
+              {networkStatus === 'failed' && <div className="text-xs text-amber-300/80 mt-1">弱网将自动降级为纯语音/纯文字模式</div>}
+            </div>
           </div>
-          <span className="text-xs text-slate-400">{networkStatus === 'checking' ? '检测中' : ''}</span>
         </div>
 
-        {/* 移动端提示 */}
+        {/* 移动端专项提示：amber 玻璃横幅 */}
         {isMobile && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
-            <div className="text-sm font-semibold text-amber-800">📱 移动端提示</div>
-            <ul className="text-xs text-amber-700 list-disc pl-4 space-y-0.5">
+          <div className="badge-warning rounded-2xl p-4 space-y-1">
+            <div className="text-sm font-semibold text-amber-300">📱 移动端提示</div>
+            <ul className="text-xs text-amber-200/70 list-disc pl-4 space-y-0.5">
               {orientationHint && <li>{orientationHint}</li>}
               <li>请保持手机前台，iOS Safari 后台会限制音频播放</li>
               <li>省电模式可能降低帧率与语音质量</li>
@@ -273,28 +315,40 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
           </div>
         )}
 
-        {/* 隐私同意（C4） */}
-        <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-1 w-4 h-4" />
-            <span className="text-sm text-slate-700">
-              我同意保存本次群面的<b>转写文本与聚合特征</b>用于面后评估；<b>原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成（0 字节上传）。
+        {/* 隐私同意（C4）：玻璃 toggle */}
+        <div className="glass-card p-4">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={consent}
+              aria-label="同意保存转写文本与聚合特征"
+              data-on={consent}
+              onClick={() => setConsent(!consent)}
+              className="glass-toggle mt-0.5"
+            >
+              <span className="glass-toggle-knob" />
+            </button>
+            <span className="text-sm text-white/70">
+              我同意保存本次群面的<b className="text-white">转写文本与聚合特征</b>用于面后评估；<b className="text-white">原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成（0 字节上传）。
               第三方 API（DeepSeek / StepFun）按隐私政策处理数据。
             </span>
-          </label>
+          </div>
         </div>
-        {/* 群面阶段说明（PRD 4.1.3） */}
-        <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100">
-          <div className="text-sm font-semibold text-blue-800 mb-2">⏱️ 群面流程（倒计时驱动，到点强制切换）</div>
-          <ol className="text-xs text-blue-700 space-y-1 list-decimal pl-4">
-            <li>审题（2 分钟，暂不发言）</li>
-            <li>个人陈述（每人 1 分钟）</li>
-            <li>自由讨论（≤15 分钟，可打断/抢话）</li>
-            <li>总结陈词（3 分钟）→ 面后报告</li>
+
+        {/* 群面阶段说明（PRD 4.1.3）：阶段色圆点 */}
+        <div className="glass-panel p-4">
+          <div className="text-sm font-semibold text-white/85 mb-2">⏱️ 群面流程（倒计时驱动，到点强制切换）</div>
+          <ol className="text-xs text-white/60 space-y-1.5 list-decimal pl-4">
+            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，暂不发言）</li>
+            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
+            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断/抢话）</li>
+            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）→ 面后报告</li>
           </ol>
         </div>
-        <div className="flex gap-3">
-          <button onClick={onBack} className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200">
+
+        <div className="flex gap-3 pt-2">
+          <button onClick={onBack} className="glass-btn-ghost px-6 py-3 font-medium">
             上一步
           </button>
           <button
@@ -302,7 +356,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
               onReady({ cameraEnabled: cameraEnabled && cameraStatus === 'passed', voiceEnabled: micStatus !== 'failed', facingMode, consentSaveTranscript: consent })
             }
             disabled={!canEnter}
-            className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-40"
+            className="glass-btn-primary flex-1 py-3 font-bold text-base"
           >
             进入群面房间
           </button>

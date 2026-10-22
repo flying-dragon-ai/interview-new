@@ -10,31 +10,37 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+/** M7 Phase 1：会话逻辑在 controller，经典 UI 拆为 DiscussionPanel + classic/* */
+const readController = () => read('src/session/sessionController.ts');
+const readClassicUi = () =>
+  read('components/DiscussionPanel.tsx') +
+  read('components/classic/ClassicPhaseHeader.tsx') +
+  read('components/classic/ClassicAside.tsx') +
+  read('components/classic/MessageBubble.tsx');
 
-test('TC-04: 用户输入/说话时调用 bargeIn（DiscussionPanel 接线）', () => {
+test('TC-04: 用户输入/说话时调用 bargeIn（SessionController + DiscussionPanel 接线）', () => {
+  const controller = readController();
+  // 发送消息即抢话（sendTextMessage 首步 bargeIn）
+  assert.ok(/sendTextMessage\(text: string\)[\s\S]{0,400}this\.bargeIn\(\)/.test(controller), 'sendTextMessage 未先调用 bargeIn');
+  assert.ok(/this\.voice\?\.bargeIn\(\)/.test(controller), 'controller.bargeIn 未调用 VoiceService.bargeIn');
+  // 麦克风按下即抢话（面板接线到 controller.bargeIn）
   const panel = read('components/DiscussionPanel.tsx');
-  // 发送消息即抢话
-  assert.ok(/voiceRef\.current\?\.bargeIn\(\)/.test(panel), 'handleSendMessage 未调用 bargeIn');
-  // 麦克风按下即抢话
   assert.ok(/if \(!isListening && \(speakingCharId \|\| isGenerating\)\)[\s\S]{0,200}bargeIn/.test(panel), 'toggleListening 未实现抢话');
 });
-
 test('TC-05: AI 发言超时被打断后由调度器立即安排发言（interrupt → triggerAITurn）', () => {
-  const panel = read('components/DiscussionPanel.tsx');
-  assert.ok(/evaluateInterrupt\(roles, turnRef\.current, now\)/.test(panel), '未评估打断规则');
-  assert.ok(/registerInterrupt\(turnRef\.current, interrupt\.targetId, interrupt\.interrupterId\)/.test(panel), '打断未登记（罚分/加成）');
-  assert.ok(/event_type: 'interrupt'/.test(panel), '打断事件未记录');
+  const controller = readController();
+  assert.ok(/evaluateInterrupt\(this\.deps\.roles, this\.turn, now\)/.test(controller), '未评估打断规则');
+  assert.ok(/registerInterrupt\(this\.turn, interrupt\.targetId, interrupt\.interrupterId\)/.test(controller), '打断未登记（罚分/加成）');
+  assert.ok(/event_type: 'interrupt'/.test(controller), '打断事件未记录');
   // 用户被点名 5 秒未回应 → 其他 AI 接话
-  assert.ok(/evaluateUserCalledNoResponse\(roles, turnRef\.current, now\)/.test(panel), '未实现点名未响应接话');
+  assert.ok(/evaluateUserCalledNoResponse\(this\.deps\.roles, this\.turn, now[,\)]/.test(controller), '未实现点名未响应接话');
 });
-
-test('TC-10: 异常降级提示与语音模式展示（DiscussionPanel）', () => {
-  const panel = read('components/DiscussionPanel.tsx');
-  assert.ok(/degraded/.test(panel) && /部分能力降级中/.test(panel), '缺少降级提示');
-  assert.ok(/StepFun ASR|浏览器语音（兜底）|纯文字（降级）/.test(panel), '缺少输入模式展示');
-  assert.ok(/StepFun TTS|纯文字（降级）/.test(panel), '缺少输出模式展示');
+test('TC-10: 异常降级提示与语音模式展示（经典 UI）', () => {
+  const classic = readClassicUi();
+  assert.ok(/degraded/.test(classic) && /部分能力降级中/.test(classic), '缺少降级提示');
+  assert.ok(/StepFun ASR|浏览器语音（兜底）|纯文字（降级）/.test(classic), '缺少输入模式展示');
+  assert.ok(/StepFun TTS|纯文字（降级）/.test(classic), '缺少输出模式展示');
 });
-
 test('TC-07: 报告证据点击定位到原话（EvidenceReport 接线）', () => {
   const report = read('components/EvidenceReport.tsx');
   assert.ok(/setHighlightMsgIndex/.test(report), '证据点击未定位消息');
@@ -43,20 +49,19 @@ test('TC-07: 报告证据点击定位到原话（EvidenceReport 接线）', () =
 });
 
 test('TC-08/US-09: 响应式布局（桌面右侧栏 + 移动端折叠）', () => {
-  const panel = read('components/DiscussionPanel.tsx');
-  // 桌面右侧栏
-  assert.ok(/hidden md:flex md:w-80/.test(panel), '缺少桌面右侧栏');
+  const classic = readClassicUi();
+  // 桌面右侧栏（ClassicAside）
+  assert.ok(/hidden md:flex md:w-80/.test(classic), '缺少桌面右侧栏');
   // 移动端折叠题目卡
-  assert.ok(/md:hidden mx-3 mt-2/.test(panel), '缺少移动端折叠题目卡');
+  assert.ok(/md:hidden mx-3 mt-2/.test(classic), '缺少移动端折叠题目卡');
   // 移动端横向角色卡
-  assert.ok(/md:hidden px-3 pt-3/.test(panel), '移动端形象台未按断点控制');
-  // 倒计时始终可见（顶部）
-  assert.ok(/formatCountdown\(displayRemaining\)/.test(panel), '倒计时未常驻');
+  assert.ok(/md:hidden px-3 pt-3/.test(classic), '移动端形象台未按断点控制');
+  // 倒计时始终可见（顶部，ClassicPhaseHeader）
+  assert.ok(/formatCountdown\(displayRemaining\)/.test(classic), '倒计时未常驻');
   // 房间上下文条（VoiceRoom）
   const room = read('components/VoiceRoom.tsx');
   assert.ok(/hidden md:flex/.test(room), 'VoiceRoom 缺少桌面上下文条');
 });
-
 test('TC-09/US-10: 前后摄像头切换（DeviceCheck 接线）', () => {
   const dc = read('components/DeviceCheck.tsx');
   assert.ok(/facingMode/.test(dc) && /switchCamera/.test(dc), '缺少摄像头切换');
@@ -119,14 +124,61 @@ test('4.1.1: 前端服务层只调 /api/llm（无直连 DeepSeek）', () => {
 });
 
 test('4.1.3: 房间使用倒计时阶段与要点跟踪（非 25 轮）', () => {
-  const panel = read('components/DiscussionPanel.tsx');
-  assert.ok(/tickPhase/.test(panel), '未驱动倒计时引擎');
-  assert.ok(/MAX_DISCUSSIONS_PER_KEY_POINT|maybeAdvanceKeyPoint/.test(panel), '缺少要点跟踪');
-  assert.ok(!/MAX_ROUNDS/.test(panel), '仍存在 25 轮上限');
+  const controller = readController();
+  assert.ok(/tickPhase/.test(controller), '未驱动倒计时引擎');
+  assert.ok(/MAX_DISCUSSIONS_PER_KEY_POINT|maybeAdvanceKeyPoint/.test(controller), '缺少要点跟踪');
+  assert.ok(!/MAX_ROUNDS/.test(controller), '仍存在 25 轮上限');
+});
+test('D4: 关键词检测降级为辅助（advancePhaseByKeyword 仅兜底）', () => {
+  const controller = readController();
+  assert.ok(/advancePhaseByKeyword/.test(controller), '未保留关键词兜底');
+  assert.ok(/phase\.id === 'FREE_DISCUSSION' && this\.shouldAdvanceByKeyword/.test(controller), '关键词推进未限定条件');
 });
 
-test('D4: 关键词检测降级为辅助（advancePhaseByKeyword 仅兜底）', () => {
-  const panel = read('components/DiscussionPanel.tsx');
-  assert.ok(/advancePhaseByKeyword/.test(panel), '未保留关键词兜底');
-  assert.ok(/phase\.id === 'FREE_DISCUSSION' && shouldAdvanceByKeyword/.test(panel), '关键词推进未限定条件');
+// ==================== M7 P2：Realtime 全双工与实时打断 ====================
+
+test('M7-P2: onUserVadStart 调用了 bargeIn 且取消了挂起调度（≤300ms 实时打断接线）', () => {
+  const controller = read('src/session/sessionController.ts');
+  const vadBlock = controller.slice(controller.indexOf('onUserVadStart(): void'));
+  assert.ok(/this\.voice\?\.bargeIn\(\)/.test(vadBlock.slice(0, 800)), 'onUserVadStart 未先停 TTS 播放');
+  assert.ok(/clearTimeout\(this\.scheduled\)/.test(vadBlock.slice(0, 1200)), 'onUserVadStart 未取消挂起的调度');
+  assert.ok(/user_barge_in_realtime/.test(vadBlock), '未登记 user_barge_in_realtime 打断事件');
+});
+
+test('M7-P2: realtime-token 端点与 503 降级契约（fallback: push-to-talk）', () => {
+  const api = read('api/realtime-token.ts');
+  assert.ok(/issueToken\('realtime'\)/.test(api), '未签发 realtime 凭证');
+  assert.ok(/503/.test(api) && /fallback: 'push-to-talk'/.test(api), '缺少 503 + fallback 降级契约');
+});
+
+test('M7-P2: StepFun 专有事件名只允许出现在适配层（供应商边界）', () => {
+  const proprietary = ['speech_started', 'speech_stopped', 'input_audio_buffer', 'session.update', 'response.cancel'];
+  const frontendFiles = [
+    'components/DiscussionPanel.tsx',
+    'components/VoiceRoom.tsx',
+    'src/session/sessionController.ts',
+    'src/session/sessionStore.ts',
+    'src/session/useSession.ts',
+    'services/voiceService.ts',
+    'services/geminiService.ts',
+  ];
+  for (const f of frontendFiles) {
+    const src = read(f);
+    for (const kw of proprietary) {
+      assert.ok(!src.includes(kw), `${f} 泄漏 StepFun 专有事件名 ${kw}（应收敛在 services/realtimeClient.ts）`);
+    }
+  }
+  // 适配层确实包含这些事件名（边界成立）
+  const client = read('services/realtimeClient.ts');
+  for (const kw of proprietary) {
+    assert.ok(client.includes(kw), `realtimeClient.ts 缺少事件名 ${kw}`);
+  }
+});
+
+test('M7-P2: dev WS 代理挂载（浏览器无法设 Authorization 头 → 服务端代理）', () => {
+  const localApi = read('server/local-api.ts');
+  assert.ok(/realtime-proxy/.test(localApi) && /upgrade/.test(localApi), 'local-api 未挂载 realtime WS 代理');
+  const proxy = read('server/realtime-proxy.ts');
+  assert.ok(/Authorization: `Bearer/.test(proxy), '代理未持 key 连上游');
+  assert.ok(/verifyToken/.test(proxy), '代理未校验短时凭证');
 });

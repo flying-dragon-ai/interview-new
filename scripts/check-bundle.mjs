@@ -55,3 +55,49 @@ if (findings > 0) {
   process.exit(1);
 }
 console.log(`✅ TC-00 通过：${files.length} 个构建产物文件中无任何 API key / 数据库凭据`);
+
+// ============================================================
+// 体积门禁（M7 Phase 0 新增；与密钥扫描共用本脚本，一次 build 两项检查）
+//
+// 背景：M7 引入 three / @react-three/fiber / @react-three/drei / @pixiv/three-vrm。
+// 这些依赖只允许经 React.lazy 进入 ImmersiveRoom 的懒加载 chunk，绝不许进入
+// app.html 的静态主图（否则首屏必然超预算）。因此采用「总量 + 单 chunk」双闸：
+//
+//  - CHUNK_MAX_BYTES：任一 chunk 的硬上限。现主静态包（index-*.js，wagmi/para 栈）
+//    约 2.4MB，定为 3.2MB——若 three 被误静态引入主图，主包将超 4MB 并在此处失败；
+//    three 懒加载包自身约 1.3MB，远在闸内。
+//  - ENTRY_MAX_BYTES：app.html 直连入口 stub（app-*.js）上限 512KB（当前 ~305KB），
+//    防止入口 stub 膨胀。
+//  - TOTAL_MAX_BYTES：dist 全部 JS 总量上限 14MB（当前 ~9MB + three/drei/vrm ~2MB 预留）。
+//
+// 调整规则：放宽任何阈值必须在注释里写明原因与当时的实测基线。
+// ============================================================
+const CHUNK_MAX_BYTES = 3.2 * 1024 * 1024;
+const ENTRY_MAX_BYTES = 512 * 1024;
+const TOTAL_MAX_BYTES = 14 * 1024 * 1024;
+
+const jsFiles = files.filter((f) => extname(f) === '.js');
+let sizeFailures = 0;
+let totalJs = 0;
+for (const file of jsFiles) {
+  const bytes = statSync(file).size;
+  totalJs += bytes;
+  const kb = (bytes / 1024).toFixed(0);
+  if (bytes > CHUNK_MAX_BYTES) {
+    sizeFailures += 1;
+    console.error(`❌ [体积] ${file} ${kb}KB 超过单 chunk 上限 ${(CHUNK_MAX_BYTES / 1024 / 1024).toFixed(1)}MB（three/R3F/VRM 必须 React.lazy 懒加载，不得进入主静态图）`);
+  }
+  if (/assets[\\/]app-[^/\\]*\.js$/.test(file) && bytes > ENTRY_MAX_BYTES) {
+    sizeFailures += 1;
+    console.error(`❌ [体积] 入口 stub ${file} ${kb}KB 超过 ${ENTRY_MAX_BYTES / 1024}KB`);
+  }
+}
+if (totalJs > TOTAL_MAX_BYTES) {
+  sizeFailures += 1;
+  console.error(`❌ [体积] dist JS 总量 ${(totalJs / 1024 / 1024).toFixed(1)}MB 超过 ${(TOTAL_MAX_BYTES / 1024 / 1024).toFixed(0)}MB`);
+}
+if (sizeFailures > 0) {
+  console.error(`\n❌ 体积门禁失败：${sizeFailures} 处超限（如需放宽请更新本脚本注释说明原因）`);
+  process.exit(1);
+}
+console.log(`✅ 体积门禁通过：${jsFiles.length} 个 JS chunk，总量 ${(totalJs / 1024 / 1024).toFixed(1)}MB / 上限 ${(TOTAL_MAX_BYTES / 1024 / 1024).toFixed(0)}MB`);

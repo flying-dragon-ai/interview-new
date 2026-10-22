@@ -21,8 +21,8 @@ const config: PhaseConfig = {
   openingOrder: ['a1', 'a2', 'user'],
 };
 
-test('PRD 4.1.3: 默认四阶段时长（审题2min/个人陈述每人1min/自由讨论15min/总结3min）', () => {
-  assert.equal(PHASE_DEFS[0].durationMs, 2 * 60 * 1000);
+test('PRD 4.1.3: 默认四阶段时长（审题10s/个人陈述每人1min/自由讨论15min/总结3min）', () => {
+  assert.equal(PHASE_DEFS[0].durationMs, 10 * 1000);
   assert.equal(PHASE_DEFS[1].durationMs, 4 * 60 * 1000); // 4 人 × 1min
   assert.equal(PHASE_DEFS[2].durationMs, 15 * 60 * 1000);
   assert.equal(PHASE_DEFS[3].durationMs, 3 * 60 * 1000);

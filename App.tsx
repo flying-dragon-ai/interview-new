@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import SetupForm from './components/SetupForm';
 import DeviceCheck, { type DeviceCheckResult } from './components/DeviceCheck';
 import VoiceRoom from './components/VoiceRoom';
 import EvidenceReport from './components/EvidenceReport';
-import FeedbackReport from './components/FeedbackReport';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import WalletButton from './components/WalletButton';
 import { useWalletIdentity } from './src/wallet/context';
-import { SimulationState, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
+import { SimulationState, InterviewFormat, Message, GameEvent, RoleCard, ReportV15, FeedbackData } from './types';
 import { generateReportV15, generateFeedback } from './services/geminiService';
 import {
   createSession,
@@ -28,10 +27,7 @@ const App: React.FC = () => {
     topic: '',
     jobTitle: '',
     company: '',
-    messages: [],
     status: 'IDLE',
-    activeCharacterId: null,
-    round: 0,
   });
   const [roles, setRoles] = useState<RoleCard[]>([]);
   const [topicType, setTopicType] = useState('business_case');
@@ -42,23 +38,38 @@ const App: React.FC = () => {
   const [dbAvailable, setDbAvailable] = useState(true);
 
   const [report, setReport] = useState<ReportV15 | null>(null);
-  const [legacyFeedback, setLegacyFeedback] = useState<FeedbackData | null>(null);
   const [finishedMessages, setFinishedMessages] = useState<Message[]>([]);
   const [finishedEvents, setFinishedEvents] = useState<GameEvent[]>([]);
   const [sessionStartAt, setSessionStartAt] = useState(0);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  // 导航吸顶：滚动后背景透明度 white/6 → white/10
+  const [navScrolled, setNavScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setNavScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
   // Q-N1：Para 钱包地址作为免登录用户标识（未配置 Para 时恒为匿名）
   const wallet = useWalletIdentity();
 
   // ---- 准备页 → 设备检测 ----
-  const startPreparation = (params: { topic: string; jobTitle: string; company: string; topicType: string; roles: RoleCard[] }) => {
+  const startPreparation = (params: {
+    topic: string;
+    jobTitle: string;
+    company: string;
+    topicType: string;
+    format: InterviewFormat;
+    roles: RoleCard[];
+  }) => {
     setState((prev) => ({
       ...prev,
       topic: params.topic,
       jobTitle: params.jobTitle,
       company: params.company,
+      format: params.format,
       status: 'PREPARING',
     }));
     setRoles(params.roles);
@@ -77,6 +88,7 @@ const App: React.FC = () => {
       jobTitle: state.jobTitle,
       topic: state.topic,
       topicType,
+      format: state.format,
       roles: roles.map((r) => r.id),
       voiceEnabled: result.voiceEnabled,
       cameraEnabled: result.cameraEnabled,
@@ -93,8 +105,13 @@ const App: React.FC = () => {
   };
 
   // ---- 群面结束 → 面后分析 → 报告 v1.5 ----
-  const finishSimulation = async (history: Message[], events: GameEvent[], startedAt: number) => {
-    setState((prev) => ({ ...prev, status: 'FINISHED', messages: history }));
+  const finishSimulation = async (
+    history: Message[],
+    events: GameEvent[],
+    startedAt: number,
+    visualRows: import('./types').VisualFeatureRow[] = []
+  ) => {
+    setState((prev) => ({ ...prev, status: 'FINISHED' }));
     setFinishedMessages(history);
     setFinishedEvents(events);
     setSessionStartAt(startedAt);
@@ -103,50 +120,33 @@ const App: React.FC = () => {
 
     const durationMs = Date.now() - startedAt;
 
-    // 并行：服务端分析（有会话时）+ 旧 4 字段报告（冗余展示）
-    const tasks: Promise<unknown>[] = [];
-
-    tasks.push(
-      (async () => {
-        try {
-          let reportV15: ReportV15 | null = null;
-          if (sessionId && consent) {
-            reportV15 = await triggerAnalyze(sessionId);
-          }
-          if (!reportV15) {
-            reportV15 = await generateReportV15({
-              topic: state.topic,
-              jobTitle: state.jobTitle,
-              messages: history,
-              events,
-              sessionStartAt: startedAt,
-              durationMs,
-              sessionId,
-            });
-          }
-          setReport(reportV15);
-          if (sessionId && consent) {
-            saveReport({ sessionId, report: reportV15 });
-          }
-        } catch (e) {
-          console.error('报告 v1.5 生成失败:', e);
-          setFeedbackError(true);
+    try {
+      let reportV15: ReportV15 | null = null;
+      if (sessionId && consent) {
+        // 服务端分析：读 DB transcripts/events/visual_features → 规则引擎 + LLM → 已落库
+        reportV15 = await triggerAnalyze(sessionId);
+      }
+      if (!reportV15) {
+        // 客户端兜底（本地模式 / 服务端异常）：用会话内存数据生成，需手动落库
+        reportV15 = await generateReportV15({
+          topic: state.topic,
+          jobTitle: state.jobTitle,
+          messages: history,
+          events,
+          sessionStartAt: startedAt,
+          durationMs,
+          visualRows,
+          sessionId,
+        });
+        if (sessionId && consent) {
+          saveReport({ sessionId, report: reportV15 });
         }
-      })()
-    );
-
-    tasks.push(
-      (async () => {
-        try {
-          const legacy = await generateFeedback(state.topic, state.jobTitle, history);
-          setLegacyFeedback(legacy);
-        } catch {
-          // 旧字段报告失败不阻断 v1.5
-        }
-      })()
-    );
-
-    await Promise.all(tasks);
+      }
+      setReport(reportV15);
+    } catch (e) {
+      console.error('报告 v1.5 生成失败:', e);
+      setFeedbackError(true);
+    }
 
     // 更新会话状态
     if (sessionId) {
@@ -154,6 +154,9 @@ const App: React.FC = () => {
     }
     setIsLoadingFeedback(false);
   };
+
+  /** 旧 4 字段报告（冗余展示）：EvidenceReport 内按需懒加载，不再随收尾无条件消耗一次 LLM 调用 */
+  const loadLegacyFeedback = () => generateFeedback(state.topic, state.jobTitle, finishedMessages);
 
   const handleDeleteRecords = async (id: number): Promise<boolean> => {
     return deleteSession(id);
@@ -164,41 +167,57 @@ const App: React.FC = () => {
       topic: '',
       jobTitle: '',
       company: '',
-      messages: [],
       status: 'IDLE',
-      activeCharacterId: null,
-      round: 0,
     });
     setRoles([]);
     setSessionId(null);
     setReport(null);
-    setLegacyFeedback(null);
     setFinishedMessages([]);
     setFinishedEvents([]);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* 顶部导航 */}
-      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3">
+    <div className="min-h-screen">
+      {/* 液态折射 SVG 位移滤镜（全页挂载一次，供 .liquid 引用） */}
+      <svg aria-hidden="true" focusable="false" className="absolute w-0 h-0 overflow-hidden">
+        <defs>
+          <filter id="glass-distortion">
+            <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" />
+            <feDisplacementMap in="SourceGraphic" scale="12" />
+          </filter>
+        </defs>
+      </svg>
+
+      {/* 背景系统：深色径向渐变 + 极光光斑（玻璃感的依托） */}
+      <div className="aurora-stage" aria-hidden="true">
+        <div className="aurora-blob aurora-blob-a" />
+        <div className="aurora-blob aurora-blob-b" />
+        <div className="aurora-blob aurora-blob-c" />
+      </div>
+
+      {/* 顶部导航：吸顶玻璃条 */}
+      <div className={`glass-nav ${navScrolled ? 'glass-nav-scrolled' : ''} px-4 md:px-6 py-3`}>
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <div className="text-lg font-bold text-blue-600">LGD Simulator</div>
-          <div className="flex items-center gap-4">
+          <div className="text-lg font-bold text-gradient-brand tracking-tight">LGD Simulator</div>
+          <div className="flex items-center gap-3 md:gap-4">
             {!dbAvailable && state.status !== 'IDLE' && (
-              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+              <span className="glass-chip badge-warning text-[10px] px-2 py-0.5">
                 本地模式（未配置数据库）
               </span>
             )}
             <WalletButton />
-            <button onClick={() => setShowPrivacy(true)} className="text-sm text-slate-500 hover:text-blue-600">
+            <button onClick={() => setShowPrivacy(true)} className="glass-btn-ghost text-sm px-3 py-1.5">
               隐私政策
             </button>
-            <button onClick={restart} className="text-sm text-blue-600 hover:underline">
+            <button onClick={restart} className="glass-btn-ghost text-sm px-3 py-1.5">
               新建练习
             </button>
           </div>
         </div>
       </div>
+
+      {/* 吸顶导航占位（原导航在流内高度 57px） */}
+      <div className="h-[57px]" aria-hidden="true" />
 
       {/* 主内容 */}
       <div className={state.status === 'DISCUSSING' ? 'h-[calc(100vh-57px)]' : 'p-4 md:p-6'}>
@@ -219,6 +238,7 @@ const App: React.FC = () => {
             <VoiceRoom
               state={state}
               roles={roles}
+              format={state.format}
               sessionId={sessionId}
               consentSaveTranscript={consent}
               cameraEnabled={cameraEnabled}
@@ -234,18 +254,18 @@ const App: React.FC = () => {
             {isLoadingFeedback ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <div className="relative">
-                  <div className="w-20 h-20 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center text-blue-600 font-bold">AI</div>
+                  <div className="w-20 h-20 border-4 border-white/10 border-t-brand rounded-full animate-spin"></div>
+                  <div className="absolute inset-0 flex items-center justify-center text-gradient-brand font-bold">AI</div>
                 </div>
                 <div className="mt-6 text-center">
-                  <h3 className="text-xl font-bold text-slate-800">面试官正在整理评估报告...</h3>
-                  <p className="text-slate-500 mt-2">规则引擎实算指标 + AI 语义分析 + 证据池生成中（目标 ≤30 秒）</p>
+                  <h3 className="text-xl font-bold text-white">面试官正在整理评估报告...</h3>
+                  <p className="text-white/60 mt-2">规则引擎实算指标 + AI 语义分析 + 证据池生成中（目标 ≤30 秒）</p>
                 </div>
               </div>
             ) : report ? (
               <EvidenceReport
                 report={report}
-                legacy={legacyFeedback}
+                loadLegacy={feedbackError ? undefined : loadLegacyFeedback}
                 messages={finishedMessages}
                 events={finishedEvents}
                 sessionStartAt={sessionStartAt}
@@ -253,20 +273,11 @@ const App: React.FC = () => {
                 onRestart={restart}
                 onDeleteRecords={handleDeleteRecords}
               />
-            ) : legacyFeedback ? (
-              <div className="space-y-4">
-                {feedbackError && (
-                  <div className="max-w-3xl mx-auto text-center text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
-                    ⚠️ v1.5 证据化报告生成失败（LLM 异常），已降级展示经典四维评价
-                  </div>
-                )}
-                <FeedbackReport feedback={legacyFeedback} onRestart={restart} />
-              </div>
             ) : (
-              <div className="text-center p-8 bg-white rounded-3xl shadow-xl">
-                <h2 className="text-2xl font-bold text-red-500 mb-4">反馈生成失败</h2>
-                <p className="text-slate-500 mb-6">请检查网络后重试（LLM 服务异常时会自动降级）</p>
-                <button onClick={restart} className="px-6 py-2 bg-slate-900 text-white rounded-xl">
+              <div className="text-center p-8 glass-panel">
+                <h2 className="text-2xl font-bold text-red-300 mb-4">反馈生成失败</h2>
+                <p className="text-white/60 mb-6">请检查网络后重试（LLM 服务异常时会自动降级）</p>
+                <button onClick={restart} className="glass-btn px-6 py-2">
                   返回主页
                 </button>
               </div>

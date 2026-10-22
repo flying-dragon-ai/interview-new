@@ -29,47 +29,10 @@ export interface SpeakOptions {
   instruction?: string | null;
 }
 
+import { arrayBufferToBase64 } from './binary.ts';
+import { readSseStream } from './sse.ts';
 
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
 
-/** 解析 SSE 流（event:/data: 块），逐事件回调 */
-async function readSseStream(
-  body: ReadableStream<Uint8Array>,
-  onEvent: (event: string, data: Record<string, unknown>) => void
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() ?? '';
-      for (const block of blocks) {
-        const event = block.match(/^event: (.+)$/m)?.[1] ?? 'message';
-        const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
-        if (!dataLine) continue;
-        try {
-          onEvent(event, JSON.parse(dataLine.slice(6)) as Record<string, unknown>);
-        } catch {
-          // 忽略单条解析失败
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 function detectWebSpeech(): boolean {
   return typeof window !== 'undefined' && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
@@ -143,6 +106,8 @@ export class VoiceService {
   private audioCtx: AudioContext | null = null;
   private audioQueue: AudioBufferSourceNode[] = [];
   private nextStartTime = 0;
+  /** M7 P3：播放分析器（口型/灯光律动；懒创建，插入播放链 source → analyser → destination） */
+  private playbackAnalyser: AnalyserNode | null = null;
   // Web Speech TTS 兜底
   private utterance: SpeechSynthesisUtterance | null = null;
   private speaking = false;
@@ -413,18 +378,24 @@ export class VoiceService {
       console.error('StepFun TTS 失败，降级浏览器语音/文字播报:', err);
       this.setOutputMode(this.caps.hasSpeechSynthesis ? 'webspeech-tts' : 'text-only');
     } finally {
-      // 等音频队列播完再置闲（barge-in 会立即清空）
-      const waitDrain = () => {
-        if (this.audioQueue.length === 0) {
-          this.setSpeaking(false);
-          return;
-        }
-        setTimeout(waitDrain, 100);
-      };
-      setTimeout(waitDrain, 150);
+      // 等音频队列播完再置闲（barge-in 会立即清空队列 → 立即返回）；
+      // speak() 因此在「播完」而非「流读完」时 resolve，调度器据此串行化发言
+      await this.waitForQueueDrain();
+      this.setSpeaking(false);
     }
   }
 
+
+  /** 等待播放队列排空（100ms 轮询；barge-in 清空后立即返回） */
+  private waitForQueueDrain(): Promise<void> {
+    return new Promise((resolve) => {
+      const poll = () => {
+        if (this.audioQueue.length === 0) return resolve();
+        setTimeout(poll, 100);
+      };
+      poll();
+    });
+  }
   /** PCM16 base64 入队播放（假设 24kHz 单声道，附录 G 流式音频） */
   private enqueuePcm16(base64: string): void {
     if (!this.audioCtx) return;
@@ -438,7 +409,7 @@ export class VoiceService {
       for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(this.audioCtx.destination);
+      source.connect(this.playbackAnalyser ?? this.audioCtx.destination);
       const startAt = Math.max(this.audioCtx.currentTime, this.nextStartTime);
       source.start(startAt);
       this.nextStartTime = startAt + buffer.duration;
@@ -491,6 +462,25 @@ export class VoiceService {
   /** barge-in v1：立即停止播报（TC-04：300ms 内停止） */
   bargeIn(): void {
     this.stopPlayback();
+  }
+
+  /**
+   * M7 P3：TTS 播放分析器（口型/灯光律动用）。
+   * 懒创建并接入播放链（source → analyser → destination）；不改动既有播放路径与公开 API。
+   */
+  getPlaybackAnalyser(): AnalyserNode | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      this.audioCtx = this.audioCtx ?? new AudioContext();
+      if (!this.playbackAnalyser) {
+        this.playbackAnalyser = this.audioCtx.createAnalyser();
+        this.playbackAnalyser.fftSize = 1024;
+        this.playbackAnalyser.connect(this.audioCtx.destination);
+      }
+      return this.playbackAnalyser;
+    } catch {
+      return null;
+    }
   }
 
   private stopPlayback(): void {

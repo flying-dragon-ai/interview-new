@@ -24,14 +24,35 @@ export interface RolePersona {
   legacy_name?: string;
 }
 
-/** 角色卡 voice（附录 A.1，本期启用） */
+/**
+ * 角色卡 voice（附录 A.1）。
+ * voice_id 同时用于 StepFun TTS 与 Realtime 分路建连。
+ * 官方音色和音色复刻返回的 voice id 都填这里；
+ * Realtime 的 voice 只能在建连时锁定，换音色 = 换一条分路，不能对已开的 session.update。
+ */
 export interface RoleVoice {
   provider: 'stepfun';
+  /**
+   * 音色 ID。可以是 StepFun TTS 官方音色、Realtime 系统音色，
+   * 或 https://platform.stepfun.com/docs/zh/api-reference/audio/create-voice 返回的复刻 voice id。
+   * 换克隆音色只改这个字段（或下面的 realtime_voice_id），不用改调用代码。
+   */
   voice_id: string;
-  /** 语速倍率 */
+  /**
+   * Realtime 出声音色。缺省时由 voice_id 解析：
+   * 旧 TTS 音色映射到听感最近的系统音色；未知 ID 视为复刻音色，原样透传。
+   * 显式填写后优先于解析结果（主持与候选人错开、或直接填复刻 ID）。
+   */
+  realtime_voice_id?: string;
+  /** 语速倍率（TTS 降级链路使用；Realtime 会话没有独立语速字段） */
   rate: number;
   emotion_default: string;
 }
+
+/** 结构化单面面试官人数。需求里同时出现过 2 与 3，产品默认 3，两种都支持。 */
+export type PanelSize = 2 | 3;
+export const PANEL_SIZES = [2, 3] as const;
+export const DEFAULT_PANEL_SIZE: PanelSize = 3;
 
 export interface RoleAvatar {
   preset_id: string;
@@ -71,6 +92,9 @@ export interface AvatarPreset {
   tags: string[];
 }
 
+/** 群面阵型：lgd = 1 主持 + 3 AI 候选人 + 用户；panel = 2 或 3 位面试官 + 用户（结构化单面，默认 3） */
+export type InterviewFormat = 'lgd' | 'panel';
+
 /** 群面阶段（PRD 4.1.3 真实计时四阶段） */
 export type PhaseId = 'READING' | 'OPENING' | 'FREE_DISCUSSION' | 'SUMMARY';
 
@@ -97,6 +121,11 @@ export interface GameEvent {
   metadata?: Record<string, unknown>;
 }
 
+/** 显式说话人（M7 §6：Realtime 通道 = user；LLM+TTS 通道 = ai:<cardId>；系统提示 = system） */
+export type Speaker = 'user' | `ai:${string}` | 'system';
+/** 来源通道：报告里标注「实时语音 / AI 生成 / 手动输入」 */
+export type MessageSource = 'realtime' | 'llm' | 'text';
+
 export interface Message {
   id: string;
   senderId: string; // 'user' 或角色卡 id
@@ -111,8 +140,11 @@ export interface Message {
   stepfunSegmentId?: string | null;
   /** 情绪（LLM emotion 字段，驱动 TTS instruction 与形象表情） */
   emotion?: string;
+  /** 显式说话人；缺省时由 senderId 派生，保证旧代码与旧数据行为一致（M7 §6，全部可选向后兼容） */
+  speaker?: Speaker;
+  /** 来源通道（M7 §6） */
+  source?: MessageSource;
 }
-
 export interface FeedbackData {
   timing: string;
   voiceShare: number; // 0-100
@@ -131,6 +163,63 @@ export interface Evidence {
   dimension_hint: 'content' | 'voice' | 'visual' | 'stress' | 'teamwork';
   /** 关联消息序号（报告内定位） */
   message_index?: number;
+}
+// ============================================================
+// M6 视觉维度（PRD 附录 C.2 / D.4）
+// 摄像头画面在浏览器本地推理（MediaPipe FaceLandmarker），
+// 只上传/落库本文件的数值与枚举，原始视频 0 字节上传（C3/C4）。
+// ============================================================
+
+/** 视觉情绪（blendshapes 规则映射，PRD 4.3） */
+export type VisualEmotion = 'neutral' | 'happy' | 'nervous' | 'serious';
+
+/** 头部姿态（欧拉角，单位度） */
+export interface VisualHeadPose {
+  /** 俯仰：负值低头（< -15° 记为低头） */
+  pitch: number;
+  /** 偏航：|yaw| > 20° 记为偏头 */
+  yaw: number;
+  /** 翻滚：头部倾斜 */
+  roll: number;
+}
+
+/** 每秒一条视觉聚合特征（对齐 db/migration-v0.7.sql visual_features） */
+export interface VisualFeatureRow {
+  /** 相对 sessionStartAt 的毫秒数（每秒一行，行不等距时按墙钟解析） */
+  timestamp_ms: number;
+  /** 本秒内有脸帧中「视线看向镜头」占比 0-1 */
+  eye_contact: number;
+  /** 本秒主导情绪 */
+  emotion: VisualEmotion;
+  /** 本秒头部姿态均值（度） */
+  head_pose: VisualHeadPose;
+  /** 本秒采样帧中检测到恰好一张正脸的占比 0-1 */
+  engagement: number;
+}
+
+/** 视觉统计（summarizeVisual 输出，喂给报告引擎） */
+export interface VisualStatsInput {
+  /** 有效采样秒数（每秒一行） */
+  validRows: number;
+  /** 眼神接触均值 0-1 */
+  eyeContactRatio: number;
+  /** nervous 占比 0-1 */
+  nervousRatio: number;
+  /** 低头占比 0-1 */
+  headDownRatio: number;
+  /** 偏头占比 0-1 */
+  headTurnRatio: number;
+  /** 低头或偏头占比 0-1 */
+  headPoseRatio: number;
+  /** 面部检测稳定性均值 0-1 */
+  engagementRatio: number;
+}
+
+export interface VisualStats extends VisualStatsInput {
+  /** 维度内原始分 0-100（PRD C.2 权重合成） */
+  rawScore: number;
+  /** 显著偏离段证据（≤3 段） */
+  evidence: Evidence[];
 }
 
 /** 报告维度（PRD 附录 C，M3 过渡权重：内容 40 / 语音 25 / 抗压 20 / 协作 15） */
@@ -164,8 +253,7 @@ export interface SimulationState {
   topic: string;
   jobTitle: string;
   company: string;
-  messages: Message[];
   status: 'IDLE' | 'PREPARING' | 'DISCUSSING' | 'FINISHED';
-  activeCharacterId: string | null;
-  round: number;
+  /** 群面阵型（缺省 lgd，向后兼容旧数据） */
+  format?: InterviewFormat;
 }
