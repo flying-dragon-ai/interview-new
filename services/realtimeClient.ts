@@ -232,15 +232,19 @@ export class RealtimeClient {
    * 模型以语音回复（response.audio.delta），本类直接入队播放；字幕经 onAssistantTextDelta/Done 上抛。
    * 非连接态静默丢弃（上层经 state 判断，降级链路接管）。
    */
-  speak(text: string): void {
+  speak(text: string, delivery: 'wrap' | 'verbatim' = 'wrap'): void {
     const line = text.trim();
     if (!line) return;
+    const payload =
+      delivery === 'verbatim'
+        ? line
+        : `【台词播报】请用自然口语逐字读出下面这段台词，一字不差，不要添加、解释或改写任何内容：\n${line}`;
     this.sendJson({
       type: 'conversation.item.create',
       item: {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: `【台词播报】请用自然口语逐字读出下面这段台词，一字不差，不要添加、解释或改写任何内容：\n${line}` }],
+        content: [{ type: 'input_text', text: payload }],
       },
     });
     this.sendJson({ type: 'response.create' });

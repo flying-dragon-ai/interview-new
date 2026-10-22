@@ -132,10 +132,12 @@ test('音色解析：旧 TTS ID 映射，系统音色与复刻 ID 原样透传',
   assert.equal(explicit.source, 'explicit');
   assert.equal(explicit.cloned, true);
 
-  assert.equal(resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId, 'wenrounansheng');
-  assert.notEqual(
+  assert.equal(resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId, 'linjiajiejie');
+  assert.equal(resolveVoiceBinding(HOST_CARD.voice).source, 'system');
+  assert.equal(
     resolveVoiceBinding(HOST_CARD.voice).realtimeVoiceId,
-    resolveVoiceBinding({ voice_id: HOST_CARD.voice.voice_id }).realtimeVoiceId
+    resolveVoiceBinding({ voice_id: HOST_CARD.voice.voice_id }).realtimeVoiceId,
+    '主持的 TTS 与 Realtime 共用 linjiajiejie'
   );
 });
 
@@ -169,6 +171,7 @@ test('耳会话只听，嘴会话按解析后的音色去重，复刻 ID 原样�
   const youthText = youth!.sentJson().filter((m) => m.type === 'conversation.item.create');
   assert.equal(youthText.length, 2, '同音色的两个角色走同一条连接');
   assert.ok(JSON.stringify(youthText).includes('用户调研'));
+  assert.ok(JSON.stringify(youthText).includes('说话人：tech_visionary'));
   assert.ok(JSON.stringify(youthText).includes('增长数据'));
   assert.equal(clone!.sentJson().filter((m) => m.type === 'conversation.item.create').length, 0);
 
@@ -272,7 +275,7 @@ test('会话接线：AI 台词进对应嘴会话，转写仍归属 ai:<roleId>�
   const c = new SessionController(deps());
   await c.initRealtime();
   assert.equal(c.store.getSnapshot().realtimeStatus, 'active');
-  assert.ok(mouths.includes('wenrounansheng'), '无领导讨论应为主持单开音色');
+  assert.ok(mouths.includes('linjiajiejie'), '无领导讨论应为主持单开音色');
   assert.equal(new Set(mouths).size, 4, '3 位候选人 + 主持，四把不同的声音');
   c.forcePhaseForTest({ phaseIndex: 2, phaseStartedAt: Date.now(), openingIndex: 4, openingStartedAt: Date.now(), finished: false });
   await c.triggerAITurn(roles[0], { speakerKind: 'candidate', force: true });
@@ -299,7 +302,7 @@ test('会话接线：AI 台词进对应嘴会话，转写仍归属 ai:<roleId>�
   );
   await panel.initRealtime();
   assert.equal(panelMouths.length, 2);
-  assert.ok(!panelMouths.includes('wenrounansheng'), '结构化单面不加入主持音色');
+  assert.ok(!panelMouths.includes('linjiajiejie'), '结构化单面不加入主持音色');
   panel.dispose();
 
   const down = new SessionController(

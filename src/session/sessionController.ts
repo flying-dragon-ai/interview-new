@@ -28,7 +28,7 @@ import { generateAIReply, type ReplyParams, type ReplyResult } from '../../servi
 import { guidesToNextKeyPoint, proposesSummary } from '../../engine/discourseSignals.ts';
 import { VoiceService } from '../../services/voiceService.ts';
 import { RealtimeClient, type RealtimeClientOptions } from '../../services/realtimeClient.ts';
-import type { VoiceLanePool } from '../../services/voiceLanes.ts';
+import type { VoiceLanePool, VoiceLanePoolOptions } from '../../services/voiceLanes.ts';
 import { RealtimeVoiceRouter, type VoiceSpeaker } from '../../services/realtimeVoiceRouter.ts';
 import { HOST_CARD, isHostCard } from '../../data/interviewerCards.ts';
 import { saveMessage, saveEvents } from '../api.ts';
@@ -75,10 +75,11 @@ export interface SessionDeps {
   /** 测试注入：替换 Realtime 建链（默认 RealtimeClient.create） */
   createRealtimeClient?: (opts: RealtimeClientOptions) => Promise<RealtimeClient>;
   /**
-   * 测试注入：替换音色分路池。
-   * 未注入且未替换 RealtimeClient 时，默认按本场角色卡各开一条锁定音色的播报连接。
+   * 测试注入：替换嘴会话分路池。
+   * 缺省时 VoiceLanePool 按本场解析后的音色各开一条 Realtime 嘴会话。
+   * 耳会话仍走 createRealtimeClient；某一把分路失败只让该音色退回 TTS。
    */
-  createVoiceLanes?: (voices: string[]) => Promise<VoiceLanePool>;
+  createVoiceLanes?: (opts: VoiceLanePoolOptions) => Promise<VoiceLanePool>;
 }
 
 function buildOpeningOrder(cards: RoleCard[], format: InterviewFormat): string[] {
@@ -345,7 +346,7 @@ export class SessionController {
 
       // 语音输出：该角色的 Realtime 嘴会话优先（每把音色一条连接）；
       // 这把声音没有嘴会话时降级 StepFun TTS / 浏览器语音（二选一，禁止双声道齐播）
-      const voicedByMouth = this.router?.speak(card.id, content) ?? false;
+      const voicedByMouth = this.router?.speak(card.id, content, result.stepfun_tts_instruction) ?? false;
       if (voicedByMouth || (!this.router && this.isRealtimeVoiceActive() && this.realtime)) {
         this.realtimeSpeakingCharId = card.id;
         this.store.set({ speakingCharId: card.id });
@@ -726,6 +727,7 @@ export class SessionController {
       const router = await RealtimeVoiceRouter.connect({
         speakers: this.voiceSpeakers(),
         createClient: create,
+        createLanes: this.deps.createVoiceLanes,
         onMouthPlayback: (roleId, speaking) => {
           if (speaking && roleId) {
             this.realtimeSpeakingCharId = roleId;
@@ -777,7 +779,7 @@ export class SessionController {
     for (const card of cards) {
       if (seen.has(card.id)) continue;
       seen.add(card.id);
-      speakers.push({ roleId: card.id, voice: card.voice });
+      speakers.push({ roleId: card.id, name: card.name, voice: card.voice });
     }
     return speakers;
   }

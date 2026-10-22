@@ -5,7 +5,8 @@
 
 - `services/voiceBinding.ts`：角色 → 音色
 - `services/realtimeClient.ts`：单条连接（`ear` / `mouth` / `duplex`）
-- `services/realtimeVoiceRouter.ts`：一场面试里的多条连接
+- `services/voiceLanes.ts`：按音色去重的嘴会话池（唯一分路登记处）
+- `services/realtimeVoiceRouter.ts`：一场面试里的耳会话 + 分路池
 - `src/session/sessionController.ts`：阶段、发言权、打断、落库
 - `components/SetupForm.tsx`：两种模式与面试官人数
 
@@ -62,8 +63,8 @@
 ### B. 一条耳会话 + 按音色去重的嘴会话（采用）
 
 - **耳**：唯一接收麦克风的连接。打开 `server_vad`。只产出转写和「用户开始说话」。模型自己生成的音频直接丢掉，并 `response.cancel`，避免它用一把默认声音插话。
-- **嘴**：每个不同的 `realtimeVoiceId` 一条连接。不采集麦克风，不打开 VAD。导演 LLM 写好的台词用 `conversation.item.create` + `response.create` 让这把声音逐字读出来。
-- 同一把声音的角色共用一条嘴（他们本来就该是同一种声音）。
+- **嘴**：`VoiceLanePool` 为每个不同的 `realtimeVoiceId` 建一条 `RealtimeClient`（`channel=mouth`）。不采集麦克风，不打开 VAD。导演 LLM 写好的台词用 `conversation.item.create` + `response.create` 让这把声音逐字读出来，口播指令里点名说话人。
+- 同一把声音的角色共用一条嘴（他们本来就该是同一种声音）。分路池是嘴会话的唯一登记处，路由器不再另养一套连接。
 
 延迟：
 
@@ -109,8 +110,7 @@ TTS 已经能按 `voice_id` 出声，复刻 ID 也能走 TTS。但它是「整�
 3. `voice_id` 是 Realtime 不接受的旧 TTS 音色（目前是 `ganliannvsheng`、`shuangkuainansheng`）→ 映射到听感接近、且已经握手上的系统音色。能直接播的旧 id 不再改写。
 4. 其他字符串 → **视为复刻音色，原样透传**。所以把 `voice_id` 换成复刻 id 之后，不用改路由代码。
 
-主持的 `voice_id` 仍是 `shenchennanyin`（TTS 降级要用，这个 id 在 Realtime 上也能出声），`realtime_voice_id` 固定为 `wenrounansheng`。
-这样主持和「深沉男音」候选人不撞声。`soft-spoken-gentleman` 已从主持卡拿掉，因为这个模型会 400。
+主持的 `voice_id` 是 `linjiajiejie`（官方 Realtime 示例音色，TTS 降级和分路播报共用）。它不在候选人的 5 个 `voice_id` 里，所以不会和「深沉男音」抢同一条分路，也不必再单开 `wenrounansheng`。`soft-spoken-gentleman` 在这个模型上会 400，不能用。
 以后给主持做复刻，只改主持卡的 `realtime_voice_id`（或把 `voice_id` 也换成复刻 id）。
 
 准备页会拒绝「配置音色重复」和「解析后实时音色重复」的组合，避免两个人选了不同的旧名字、却映射到同一把声音。
@@ -120,12 +120,12 @@ TTS 已经能按 `voice_id` 出声，复刻 ID 也能走 TTS。但它是「整�
 | 角色卡 `voice_id` | Realtime `voice` |
 |---|---|
 | `zhengpaiqingnian` | 原样（已接受） |
-| `shenchennanyin` | 原样（已接受；主持不占用这把） |
+| `shenchennanyin` | 原样（已接受；主持不占用这把，主持用 `linjiajiejie`） |
 | `shuangkuainansheng` | `yuanqinansheng` |
 | `ganliannvsheng` | `elegantgentle-female` |
 | `zhixingjiejie` | 原样（已接受） |
 
-主持的 Realtime 音色是 `wenrounansheng`。若上游改了名单，只改 `services/voiceBinding.ts`。
+主持的 Realtime 音色是 `linjiajiejie`。若上游改了名单，只改 `services/voiceBinding.ts` 和主持卡。
 
 ## 5. 会话生命周期
 
@@ -135,7 +135,7 @@ TTS 已经能按 `voice_id` 出声，复刻 ID 也能走 TTS。但它是「整�
   → 耳：WS /api/realtime?token=...  → 代理带 Bearer key 连上游
        session.update：听写指令 + server_vad，不写 voice
        开始推麦克风 PCM16（AEC / NS / AGC）
-  → 嘴：本场每个 realtimeVoiceId 各做一次同样的握手（并行）
+  → 嘴：VoiceLanePool 为本场每个 realtimeVoiceId 各做一次同样的握手（并行）
        session.update：逐字播报指令 + voice=<该音色>，不写 turn_detection，不推麦克风
 
 某角色获得发言权
@@ -316,6 +316,6 @@ pnpm dev
 
 `zhengpaiqingnian`、`shenchennanyin`、`zhixingjiejie`、`jingdiannvsheng`、`linjiajiejie`、`wenrounansheng`、`qingchunshaonv`、`elegantgentle-female`、`livelybreezy-female`、`yuanqinansheng`、`cixingnansheng`。
 
-同一轮里 `session.update` 直接 400 的包括：`soft-spoken-gentleman`、`magnetic-voiced-male`、`vibrant-youth`、`lively-girl`、`zixinnansheng`、`shuangkuainansheng`、`ganliannvsheng`。错误都是 `request_params_invalid` / `400`。因此角色卡里能直接播的中文 id 不再映射走；`shuangkuainansheng` → `yuanqinansheng`，`ganliannvsheng` → `elegantgentle-female`，主持的 `realtime_voice_id` 从无效的 `soft-spoken-gentleman` 改为 `wenrounansheng`。
+同一轮里 `session.update` 直接 400 的包括：`soft-spoken-gentleman`、`magnetic-voiced-male`、`vibrant-youth`、`lively-girl`、`zixinnansheng`、`shuangkuainansheng`、`ganliannvsheng`。错误都是 `request_params_invalid` / `400`。因此角色卡里能直接播的中文 id 不再映射走；`shuangkuainansheng` → `yuanqinansheng`，`ganliannvsheng` → `elegantgentle-female`。主持不用会 400 的 `soft-spoken-gentleman`，也不再单开 `wenrounansheng`：`voice_id` 与 Realtime 都是 `linjiajiejie`，和候选人的五把声音错开。
 
 `GET /v1/audio/system_voices?model=step-tts-2` 能返回上面被拒的英文 id。那个接口不接受 `model=stepaudio-3-realtime-preview`（`invalid model`）。TTS 名单不能当作 Realtime 白名单。真实复刻 id 这次没有样本，仍按原样透传。

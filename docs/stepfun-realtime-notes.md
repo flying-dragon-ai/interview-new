@@ -125,5 +125,6 @@ server_vad 模式下 `input_audio_buffer.append` 会自动触发大模型推理�
 |---|---|
 | `services/realtimeClient.ts` | 唯一允许出现 StepFun 事件名的地方。`channel=ear\|mouth\|duplex` |
 | `services/voiceBinding.ts` | `voice_id` / `realtime_voice_id` → `session.update.voice`。未知 ID 当复刻音色透传 |
-| `services/realtimeVoiceRouter.ts` | 1 条耳 + 按音色去重的嘴。不解析事件名 |
+| `services/voiceLanes.ts` | 按音色去重的嘴会话池。每条分路一个 mouth 客户端，点名说话人后逐字播报 |
+| `services/realtimeVoiceRouter.ts` | 1 条耳 + VoiceLanePool。不解析事件名 |
 | `server/realtime-proxy.ts` | 每条浏览器 WS 单独持 key 连上游，纯透传 |
