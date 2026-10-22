@@ -5,6 +5,7 @@ import type { RoleCard } from '../types';
  * - 不进 ROLE_CARDS 候选人池（不参与 12 卡抽选、发言权调度、音色/形象去重约束）
  * - 服务端 /api/llm 对该 id 走 host 专用 prompt（speakerKind: 'host'）
  * - 事件与转写中 speaker = 'ai:interviewer_host'，与候选人卡共用消息通道
+ * - 音色 linjiajiejie：官方 realtime 示例音色，不在候选人 5 个 voice_id 里，避免和深沉男音抢同一条分路
  */
 export const HOST_CARD_ID = 'interviewer_host';
 
@@ -24,7 +25,7 @@ export const HOST_CARD: RoleCard = {
     legacy_id: 'host',
     legacy_name: '主持面试官',
   },
-  voice: { provider: 'stepfun', voice_id: 'shenchennanyin', rate: 0.95, emotion_default: 'neutral' },
+  voice: { provider: 'stepfun', voice_id: 'linjiajiejie', rate: 0.95, emotion_default: 'neutral' },
   avatar: { preset_id: 'host_01', emotion_set: ['neutral', 'serious'] },
   behavior: {
     speak_probability: 0.2,
