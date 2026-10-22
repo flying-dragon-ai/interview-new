@@ -242,14 +242,14 @@ TTS 已经能按 `voice_id` 出声，复刻 ID 也能走 TTS。但它是「整�
 
 ## 10. 风险与未用真 key 验证的部分
 
-单测全部用 mock WebSocket，**没有**对 `wss://api.stepfun.com` 做真实握手。下面这些要以一次带 key 的手工联调为准：
+单测全部用 mock WebSocket。2026-10-22 的云代理环境里没有 `STEPFUN_API_KEY`，**没有**对 `wss://api.stepfun.com` 做真实握手。结果记在第 11 节「实测结果」。下面这些仍要以一次带 key 的联调为准：
 
-1. 系统音色名单是否仍是文档那 7 个。若 400，嘴会话会降级 TTS，面试还能继续，但声音暂时不是 Realtime 音色。改 `voiceBinding.ts` 即可。
+1. 系统音色名单是否仍是 `voiceBinding.ts` 里那 7 个。2026-10-22 的官方页面没有给 `stepaudio-3-realtime-preview` 单独白名单（见实测结果里的文档核对）。若 400，嘴会话会降级 TTS，面试还能继续，但声音暂时不是 Realtime 音色。改 `voiceBinding.ts` 即可。
 2. 复刻 id 是否真能作为 Realtime `voice`。文档说可以（用 `stepaudio-2.5-tts` 复刻后把返回 id 填进 `voice`）。我们只保证原样透传。
-3. 上游是否限制同时 4～5 条 Realtime 连接。超限时对应嘴降级，不会拖垮耳。
+3. 上游是否限制同时 4～5 条 Realtime 连接。账户级速率说明里，个人 V0 并发是 5，但是档位文档，不是这次测到的连接上限。超限时对应嘴降级，不会拖垮耳。
 4. 输出 PCM 采样率仍按 24kHz（`REALTIME_OUTPUT_SAMPLE_RATE`）。音调不对时只改这一个常量。
 5. 耳会话在句尾自动生成的回复，我们会再 `response.cancel` 一次并丢弃音频。若上游在 cancel 之后仍推很长的音频，用户不该听见（耳的音频不进播放器），但会计一次无用的生成。
-6. session 空闲多久被掐断，文档仍未写。掐断后走现有重连；嘴重连失败则该音色降级。
+6. 开发指南写明实时会话最长 30 分钟。空闲多久被掐断仍没有写，也没有这次连接可以观察。掐断后走现有重连；嘴重连失败则该音色降级。
 
 ## 11. 接入提示（怎么改、怎么配）
 
@@ -296,3 +296,32 @@ pnpm dev
 3. 候选人说话时直接插话：300ms 量级停声，转写进用户气泡，12 秒内 AI 不抢回去。
 4. 把一个角色的 `voice_id` 改成故意错误的字符串：该角色改走 TTS 或文字，其他人仍是 Realtime。
 5. 去掉 `STEPFUN_API_KEY` 重启：准备页仍能进房，状态变为按键说话 / 文字。
+
+### 实测结果（2026-10-22）
+
+真 key 联调没有执行。本云代理的 `process.env`，以及本机当时所有进程的环境，都没有 `STEPFUN_API_KEY`。`DEEPSEEK_API_KEY` 和 `DATABASE_URL` 同样没有。仓库里没有 `.env.local`。这次 run 的 dashboard 事件里也没有密钥注入记录。因此没有向上游发过带密钥的 WebSocket，下面没有一项可以写成通过。
+
+已做的无密钥检查（不能代替真连测）：
+
+- 已在跑的 `pnpm dev`（`http://127.0.0.1:3000`）同样读不到该变量。
+- `POST /api/realtime-token` 返回 HTTP 503，`error` 为 `STEPFUN_NOT_CONFIGURED`，`fallback` 为 `push-to-talk`。与第 8 节一致。
+- `/api/realtime` 代理在没有 key 时直接回 503 并断开（`server/realtime-proxy.ts`）。没有可用会话，所以没有继续做代理握手、播报、打断或断嘴降级。
+
+未测项：
+
+| 项 | 结果 |
+|---|---|
+| 真 key 下 token + `/api/realtime` 拿到可用会话 | 未测。缺 `STEPFUN_API_KEY` |
+| 角色卡 `voice_id` / `realtime_voice_id` 是否被接受 | 未测。默认映射未改 |
+| 无领导最多 5 条、单面 3–4 条是否被拒或限流 | 未测。无实际上限，无错误码 |
+| 用户开口时嘴会话立刻停播 | 未测 |
+| 断开一条嘴后只该角色退回 TTS、页面不白屏 | 未测 |
+
+文档核对（2026-10-22 抓取，不是连接结果，所以没有据此改 `services/voiceBinding.ts`）：
+
+- 端点仍是 `wss://api.stepfun.com/v1/realtime`。模型列表仍包含 `stepaudio-3-realtime-preview`。开发指南写会话最长 30 分钟。
+- Realtime「语音选项」页面举例是 `qingchunshaonv`、`wenrounansheng`、`elegantgentle-female`、`livelybreezy-female`。API 参考把前两个写在 `step-audio-2` / `step-audio-2-mini` 下，`session.update` 示例音色是 `linjiajiejie`。`stepaudio-3-realtime-preview` 没有单独白名单。
+- `GET /v1/audio/system_voices` 文档声明目前只支持 `model=step-tts-2`。返回示例里同时有当前映射用的 7 个 id（`soft-spoken-gentleman`、`magnetic-voiced-male`、`vibrant-youth`、`lively-girl`、`livelybreezy-female`、`elegantgentle-female`、`zixinnansheng`）和旧 TTS id（`ganliannvsheng`、`shenchennanyin` 等）。这是 TTS 模型示例，不能当成 Realtime 已接受。
+- 账户级速率说明：个人 V0（累计现金充值不足 ¥100）并发 5、RPM 100。这是档位文档。无领导 5 条连接如果账号落在 V0，有可能顶到这一档，需要真 key 才能确认。
+
+还缺什么：把 `STEPFUN_API_KEY` 注入到这个代理进程后再跑本节顺序。`DEEPSEEK_API_KEY` 和 `DATABASE_URL` 不阻塞「token + WS + 多音色 speak」这条最小路径；没有它们就不能测导演台词和转写落库。在密钥真的出现在 `process.env.STEPFUN_API_KEY` 之前，这张 PR 应保持 draft。
