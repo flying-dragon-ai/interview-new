@@ -229,7 +229,7 @@ const App: React.FC = () => {
 
         {state.status === 'PREPARING' && (
           <div className="max-w-2xl mx-auto">
-            <DeviceCheck onReady={enterRoom} onBack={restart} />
+            <DeviceCheck onReady={enterRoom} onBack={restart} format={state.format} />
           </div>
         )}
 

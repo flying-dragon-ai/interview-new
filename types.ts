@@ -49,10 +49,10 @@ export interface RoleVoice {
   emotion_default: string;
 }
 
-/** 结构化单面面试官人数。需求里同时出现过 2 与 3，产品默认 3，两种都支持。 */
+/** 结构化单面默认 2 位面试官，可切换为 3 位。 */
 export type PanelSize = 2 | 3;
 export const PANEL_SIZES = [2, 3] as const;
-export const DEFAULT_PANEL_SIZE: PanelSize = 3;
+export const DEFAULT_PANEL_SIZE: PanelSize = 2;
 
 export interface RoleAvatar {
   preset_id: string;

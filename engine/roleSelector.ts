@@ -1,4 +1,4 @@
-import type { PanelSize, RoleCard } from '../types';
+import { DEFAULT_PANEL_SIZE, type PanelSize, type RoleCard } from '../types.ts';
 import { ROLE_CARDS } from '../data/roleCards.ts';
 import { resolveVoiceBinding } from '../services/voiceBinding.ts';
 
@@ -83,14 +83,14 @@ export function validateSelection(cards: RoleCard[]): SelectionViolation[] {
 
 /**
  * 结构化单面面试官组合校验。
- * 人数支持 2 或 3（默认 3；需求原文同时写过两种人数）。
+ * 人数支持 2 或 3，默认 2。
  * 不要求性格互补，保留音色/形象不重复。
  * expected 传入时人数必须正好等于它（准备页按当前选择校验）。
  */
 export function validatePanelSelection(cards: RoleCard[], expected?: PanelSize): SelectionViolation[] {
   const violations: SelectionViolation[] = [];
   if (cards.length !== 2 && cards.length !== 3) {
-    violations.push({ rule: 'count', message: '结构化单面需选择 2 或 3 位面试官（默认 3）' });
+    violations.push({ rule: 'count', message: '结构化单面需选择 2 或 3 位面试官（默认 2）' });
     return violations;
   }
   if (expected !== undefined && cards.length !== expected) {
@@ -123,7 +123,7 @@ function pushVoiceViolations(cards: RoleCard[], violations: SelectionViolation[]
 /**
  * 结构化单面自动分配。优先同行业，音色与形象不重复。
  */
-export function autoSelectPanel(industry: string, seed: number, count: PanelSize = 3): RoleCard[] {
+export function autoSelectPanel(industry: string, seed: number, count: PanelSize = DEFAULT_PANEL_SIZE): RoleCard[] {
   const rng = createRng(seed);
   const pool = shuffle(ROLE_CARDS, rng);
   const ordered = [...pool.filter((c) => c.industry === industry), ...pool.filter((c) => c.industry !== industry)];

@@ -62,7 +62,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (!company || !jobTitle) {
         return response.status(400).json({ error: 'company 与 jobTitle 必填' });
       }
-      const prompt = buildTopicPrompt(company, jobTitle);
+      const format = payload.format === 'panel' ? 'panel' : 'lgd';
+      const prompt = buildTopicPrompt(company, jobTitle, {
+        format,
+        topicType: typeof payload.topicType === 'string' ? payload.topicType : undefined,
+      });
 
       if (stream) {
         const sse = createSseWriter(response);
