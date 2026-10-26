@@ -3,6 +3,9 @@
   "outputDirectory": "dist",
   "installCommand": "pnpm install",
   "framework": "vite",
+  "git": {
+    "deploymentEnabled": true
+  },
   "rewrites": [
     {
       "source": "/api/sessions/:id/:action",
