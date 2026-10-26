@@ -1,172 +1,38 @@
-# Vercel 部署指南
+# Vercel 部署
 
-## 部署前准备
+当前 Vercel 项目 interview-second 已连接 GitHub 仓库 llingqi77-tech/interview-new。正式域名为 https://www.groupinterview.online ，应用入口为 /app.html。
 
-### 1. 更新依赖锁文件
+## 自动触发机制
 
-确保 `pnpm-lock.yaml` 与 `package.json` 同步：
+- 合并或推送到 main，Vercel Git 集成自动执行生产构建，成功后更新正式域名。
+- 其他分支的推送自动生成预览部署，供 PR 验证。
+- vercel.json 显式启用 git.deploymentEnabled；构建执行 pnpm run build，发布目录为 dist。
+- 无需另外添加 Deploy Hook。独立 Deploy Hook 用于 CMS 等外部事件；再从同一次代码推送调用它会重复构建。
+- 如需手动重建，在 Vercel 的 Deployments 中选择对应部署并执行 Redeploy。
 
-```bash
-pnpm install
-```
+GitHub Actions 中的 deploy.yml 负责 GitHub Pages；Vercel 使用自身的 Git 集成。两者都由 main 推送触发，各自发布到对应平台。
 
-### 2. 提交更新的文件
+## 服务端配置
 
-```bash
-git add pnpm-lock.yaml
-git commit -m "Update pnpm-lock.yaml after removing @google/genai"
-git push
-```
+在 Vercel 项目 Settings → Environment Variables 中配置：
 
-## Vercel 部署步骤
+| 名称 | 用途 |
+|---|---|
+| DEEPSEEK_API_KEY | 题目、讨论和报告生成 |
+| STEPFUN_API_KEY | 语音能力；缺失时降级 |
+| DATABASE_URL | 会话与报告持久化；缺失时使用本地模式 |
 
-### 方法一：通过 Vercel 网站部署
+为 Production 和需要验证的 Preview 环境分别配置。密钥不写入源码、不放进 VITE_ 前缀变量，也不提供给 Pages 构建。修改后重新部署对应环境。
 
-1. **登录 Vercel**
-   - 访问 [vercel.com](https://vercel.com)
-   - 使用 GitHub 账号登录
+## 免费套餐限制
 
-2. **导入项目**
-   - 点击 "Add New Project"
-   - 选择你的 GitHub 仓库 `llingqi77-tech/interview-second`
-   - Vercel 会自动检测到这是一个 Vite 项目
+api/ 下可部署函数保持不超过 12 个。四个会话接口共用 api/sessions.ts；下划线目录中的处理模块不单独部署。构建前自动运行 scripts/check-functions.mjs，超限直接失败。
 
-3. **配置环境变量**
-   - 在 "Environment Variables" 部分添加：
-     - **Name**: `DEEPSEEK_API_KEY`
-     - **Value**: 你的 DeepSeek API Key（`sk-84606ff70f2d44f992e1d3cce2851818`）
-     - **Environment**: 选择 `Production`, `Preview`, `Development`（全部勾选）
+本地检查运行 npm run verify。验证 PR 时同时检查 Vercel 的部署状态和原有 API 地址，避免仅凭构建成功判断服务可用。
 
-4. **配置构建设置**
-   - **Framework Preset**: Vite
-   - **Build Command**: `pnpm run build`（或使用默认值）
-   - **Output Directory**: `dist`
-   - **Install Command**: `pnpm install --no-frozen-lockfile`（如果 lockfile 有问题）
+## 故障定位
 
-5. **部署**
-   - 点击 "Deploy"
-   - 等待构建完成
-
-### 方法二：使用 Vercel CLI
-
-1. **安装 Vercel CLI**
-   ```bash
-   npm i -g vercel
-   ```
-
-2. **登录 Vercel**
-   ```bash
-   vercel login
-   ```
-
-3. **在项目目录中部署**
-   ```bash
-   cd interview-second-main
-   vercel
-   ```
-
-4. **设置环境变量**
-   ```bash
-   vercel env add DEEPSEEK_API_KEY
-   # 输入你的 API Key: sk-84606ff70f2d44f992e1d3cce2851818
-   # 选择环境: Production, Preview, Development
-   ```
-
-5. **重新部署**
-   ```bash
-   vercel --prod
-   ```
-
-## 常见问题解决
-
-### 问题 1: pnpm-lock.yaml 不同步
-
-**错误信息：**
-```
-ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because pnpm-lock.yaml is not up to date
-```
-
-**解决方法：**
-1. 本地运行 `pnpm install` 更新 lockfile
-2. 提交更新的 `pnpm-lock.yaml` 文件
-3. 或者在 Vercel 项目设置中将 "Install Command" 改为：
-   ```
-   pnpm install --no-frozen-lockfile
-   ```
-
-### 问题 2: 环境变量未设置
-
-**错误信息：**
-```
-DEEPSEEK_API_KEY 环境变量未设置
-```
-
-**解决方法：**
-1. 在 Vercel 项目设置中添加环境变量
-2. 确保环境变量名称是 `DEEPSEEK_API_KEY`（不是 `VITE_DEEPSEEK_API_KEY`）
-3. 重新部署项目
-
-### 问题 3: 构建失败
-
-**可能原因：**
-- TypeScript 类型错误
-- 依赖安装失败
-- 构建命令错误
-
-**解决方法：**
-1. 检查 Vercel 构建日志
-2. 本地运行 `pnpm run build` 测试构建
-3. 修复错误后重新提交
-
-## 部署后检查
-
-1. **访问网站**
-   - 部署完成后，Vercel 会提供一个 URL（如：`https://your-project.vercel.app`）
-   - 访问该 URL 检查网站是否正常
-
-2. **测试功能**
-   - 填写公司和岗位信息
-   - 点击"生成题目"按钮，测试是否正常
-   - 如果失败，检查浏览器控制台的错误信息
-
-3. **检查环境变量**
-   - 在 Vercel 项目设置中确认环境变量已正确设置
-   - 注意：环境变量修改后需要重新部署才能生效
-
-## 自定义域名
-
-1. **在 Vercel 项目设置中添加域名**
-   - 进入项目 → Settings → Domains
-   - 添加你的域名
-
-2. **配置 DNS**
-   - 按照 Vercel 提供的 DNS 记录配置你的域名
-   - 等待 DNS 生效（通常几分钟到几小时）
-
-3. **SSL 证书**
-   - Vercel 会自动为你的域名配置 SSL 证书
-   - 无需手动配置
-
-## 注意事项
-
-⚠️ **重要安全提示：**
-- API Key 会通过 Vercel 的环境变量注入到构建产物中
-- 这意味着 API Key 会暴露在前端代码中
-- 建议：
-  1. 使用 Vercel Serverless Functions 创建 API 代理（推荐）
-  2. 或限制 API Key 的使用频率和权限
-  3. 定期更换 API Key
-
-## 更新部署
-
-每次代码更新后：
-1. 提交代码到 GitHub
-2. Vercel 会自动触发新的部署（如果已连接 GitHub）
-3. 或手动运行 `vercel --prod` 部署
-
-## 回滚部署
-
-如果新部署有问题：
-1. 在 Vercel Dashboard 中找到之前的部署
-2. 点击 "..." → "Promote to Production"
-3. 即可回滚到之前的版本
+- 开始按钮 404：检查地址是否为 /app.html，Pages 应跳转到正式应用。
+- 函数数量超限：合并入口后重新构建，保留现有路径的 rewrite。
+- FUNCTION_INVOCATION_FAILED：查看 Runtime Logs；tsconfig.json 的 rewriteRelativeImportExtensions 确保 .ts 导入在部署产物中改写为 .js。
+- 推送后未构建：检查 Vercel 项目的 Git 连接、生产分支 main、git.deploymentEnabled 和 Ignored Build Step，不要用重复的 Hook 掩盖连接问题。

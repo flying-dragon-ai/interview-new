@@ -32,12 +32,12 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: '10.28.0'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -65,8 +65,6 @@ jobs:
 
       - name: Build with Vite
         env:
-          # 从 GitHub Secrets 中获取 API Key
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           # 自动设置 base 路径
           VITE_BASE_PATH: ${{ steps.set-base.outputs.base }}
         run: |
@@ -201,6 +199,12 @@ jobs:
           fi
           echo ""
           echo "=== All checks passed ==="
+
+      # Pages hosts the landing page; the full app and /api run on Vercel.
+      - name: Prepare Pages application entry
+        env:
+          PAGES_APP_URL: https://www.groupinterview.online/app.html
+        run: node scripts/prepare-pages.mjs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
