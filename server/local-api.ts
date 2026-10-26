@@ -24,12 +24,10 @@ const STATIC_ROUTES: Record<string, string> = {
   '/api/realtime-token': '/api/realtime-token.ts',
 };
 
-/** Vercel 文件系统路由：[id] 动态段 → query.id */
+// Use the same dispatcher as production; it extracts the ID and action from
+// the original URL and keeps local and deployed session routes in sync.
 const DYNAMIC_ROUTES: { re: RegExp; file: string }[] = [
-  { re: /^\/api\/sessions\/(\d+)\/analyze$/, file: '/api/sessions/[id]/analyze.ts' },
-  { re: /^\/api\/sessions\/(\d+)\/report$/, file: '/api/sessions/[id]/report.ts' },
-  { re: /^\/api\/sessions\/(\d+)$/, file: '/api/sessions/[id]/index.ts' },
-  { re: /^\/api\/sessions\/(\d+)\/visual$/, file: '/api/sessions/[id]/visual.ts' },
+  { re: /^\/api\/sessions\/\d+(?:\/(?:analyze|report|visual))?\/?$/, file: '/api/sessions.ts' },
 ];
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -69,13 +67,11 @@ export function localApiPlugin(mode: string): Plugin {
           const pathname = url.pathname;
 
           let file = STATIC_ROUTES[pathname];
-          let id: string | null = null;
           if (!file) {
             for (const route of DYNAMIC_ROUTES) {
               const m = pathname.match(route.re);
               if (m) {
                 file = route.file;
-                id = m[1];
                 break;
               }
             }
@@ -84,7 +80,6 @@ export function localApiPlugin(mode: string): Plugin {
 
           const query: Record<string, string> = {};
           for (const [k, v] of url.searchParams) query[k] = v;
-          if (id !== null) query.id = id;
 
           const body = req.method !== 'GET' && req.method !== 'HEAD' ? await readJsonBody(req) : undefined;
 
@@ -105,7 +100,8 @@ export function localApiPlugin(mode: string): Plugin {
             return vres;
           };
 
-          const vreq = Object.assign(req, { body, query });
+          // Connect strips the /api mount prefix; handlers need the public URL.
+          const vreq = Object.assign(req, { body, query, url: rawUrl });
           try {
             const mod = await server.ssrLoadModule(file);
             await mod.default(vreq, vres);

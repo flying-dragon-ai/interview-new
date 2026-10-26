@@ -6,10 +6,10 @@ import messageHandler from '../api/message.ts';
 import eventsHandler from '../api/events.ts';
 import feedbackHandler from '../api/feedback.ts';
 import avatarsHandler from '../api/avatars.ts';
-import sessionItemHandler from '../api/sessions/[id]/index.ts';
-import reportHandler from '../api/sessions/[id]/report.ts';
-import analyzeHandler from '../api/sessions/[id]/analyze.ts';
-import visualHandler from '../api/sessions/[id]/visual.ts';
+import sessionItemHandler from '../api/_sessions/[id]/index.ts';
+import reportHandler from '../api/_sessions/[id]/report.ts';
+import analyzeHandler from '../api/_sessions/[id]/analyze.ts';
+import visualHandler from '../api/_sessions/[id]/visual.ts';
 
 /**
  * 数据库端点测试（mock pg.Pool，验证 PRD D.2/E.1/E.2/TC-11）
