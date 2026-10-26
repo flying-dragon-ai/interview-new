@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/check-functions.mjs && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/*.test.ts\"",
     "check:bundle": "node scripts/check-bundle.mjs",
+    "check:functions": "node scripts/check-functions.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "verify": "npm run check:secrets && npm run typecheck && npm run test && npm run build && npm run check:bundle",
     "test:e2e": "node scripts/e2e-api.mjs",
