@@ -12,6 +12,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/avatars/presets",
+      "destination": "/api/avatars"
+    },
+    {
       "source": "/api/sessions/:id/:action",
       "destination": "/api/sessions?__sessionRoute=:id/:action"
     },
