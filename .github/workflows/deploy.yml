@@ -200,10 +200,10 @@ jobs:
           echo ""
           echo "=== All checks passed ==="
 
-      # Pages hosts the landing page; the full app and /api run on Vercel.
+      # Pages redirects both entry points to the full app and /api on Vercel.
       - name: Prepare Pages application entry
         env:
-          PAGES_APP_URL: https://www.groupinterview.online/app.html
+          PAGES_APP_URL: https://interview-practice-77.vercel.app/
         run: node scripts/prepare-pages.mjs
 
       - name: Upload artifact

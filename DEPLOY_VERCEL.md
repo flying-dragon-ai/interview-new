@@ -1,6 +1,6 @@
 # Vercel 部署
 
-当前 Vercel 项目 interview-second 已连接 GitHub 仓库 llingqi77-tech/interview-new。正式域名为 https://www.groupinterview.online ，应用入口为 /app.html。
+当前 Vercel 项目 interview-second 已连接 GitHub 仓库 llingqi77-tech/interview-new。正式域名为 https://interview-practice-77.vercel.app/ ，根地址直接进入 AI 面试练习，介绍页已移除。旧 /app.html 和 /app 地址由 Vercel 308 跳转到根地址；构建仍包含 app.html 静态跳转页，供其他静态服务器兼容旧链接。
 
 ## 自动触发机制
 
@@ -32,7 +32,7 @@ api/ 下可部署函数保持不超过 12 个。四个会话接口共用 api/ses
 
 ## 故障定位
 
-- 开始按钮 404：检查地址是否为 /app.html，Pages 应跳转到正式应用。
+- 入口 404：根地址应直接显示练习页，旧 /app.html 应跳转到根地址，Pages 应跳转到完整应用。
 - 函数数量超限：合并入口后重新构建，保留现有路径的 rewrite。
 - FUNCTION_INVOCATION_FAILED：查看 Runtime Logs；tsconfig.json 的 rewriteRelativeImportExtensions 确保 .ts 导入在部署产物中改写为 .js。
 - 推送后未构建：检查 Vercel 项目的 Git 连接、生产分支 main、git.deploymentEnabled 和 Ignored Build Step，不要用重复的 Hook 掩盖连接问题。

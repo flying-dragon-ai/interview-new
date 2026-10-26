@@ -6,7 +6,15 @@
   "git": {
     "deploymentEnabled": true
   },
+  "redirects": [
+    { "source": "/app.html", "destination": "/", "permanent": true },
+    { "source": "/app", "destination": "/", "permanent": true }
+  ],
   "rewrites": [
+    {
+      "source": "/api/avatars/presets",
+      "destination": "/api/avatars"
+    },
     {
       "source": "/api/sessions/:id/:action",
       "destination": "/api/sessions?__sessionRoute=:id/:action"

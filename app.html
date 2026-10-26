@@ -1,17 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="data:," />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LGD Simulator - App</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-        window.process = window.process || { env: {} };
-    </script>
+    <meta http-equiv="refresh" content="0; url=./" />
+    <title>进入 AI 面试练习</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/app-entry.tsx"></script>
+    <p><a href="./">进入 AI 面试练习</a></p>
+    <script>
+      const target = new URL('./', window.location.href);
+      target.search = window.location.search;
+      target.hash = window.location.hash;
+      window.location.replace(target.href);
+    </script>
   </body>
 </html>
