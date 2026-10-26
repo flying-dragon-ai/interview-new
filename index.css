@@ -197,6 +197,16 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
 }
 
+/* 准备页模式和人数用白色明暗区分，不生成渐变外框或伪元素。 */
+.setup-choice {
+  position: relative;
+}
+.setup-choice-selected {
+  background-color: rgb(255 255 255 / 0.14) !important;
+  border-color: rgb(255 255 255 / 0.35);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
 /* 选中态：渐变描边 + bg white/12 + 顶部内高光（角色卡、步骤条当前项） */
 .glass-selected {
   background-color: rgb(255 255 255 / 0.12) !important;

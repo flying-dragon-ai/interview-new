@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import type { InterviewFormat } from '../types';
 
 /**
  * 设备检测与准备流程（PRD 4.1.2 / US-01 / 5.2）
@@ -15,6 +16,7 @@ export interface DeviceCheckResult {
 }
 
 interface DeviceCheckProps {
+  format?: InterviewFormat;
   onReady: (result: DeviceCheckResult) => void;
   onBack: () => void;
 }
@@ -38,7 +40,7 @@ function getNetworkInfo(): NetworkInfoLike | undefined {
   return (navigator as unknown as { connection?: NetworkInfoLike }).connection;
 }
 
-const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
+const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lgd' }) => {
   const [micStatus, setMicStatus] = useState<CheckStatus>('pending');
   const [micLevel, setMicLevel] = useState(0);
   const [cameraStatus, setCameraStatus] = useState<CheckStatus>('pending');
@@ -330,7 +332,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
               <span className="glass-toggle-knob" />
             </button>
             <span className="text-sm text-white/70">
-              我同意保存本次群面的<b className="text-white">转写文本与聚合特征</b>用于面后评估；<b className="text-white">原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成（0 字节上传）。
+              我同意保存本次面试的<b className="text-white">转写文本与聚合特征</b>用于面后评估；<b className="text-white">原始音频/视频默认不保存</b>，摄像头分析全部在浏览器本地完成（0 字节上传）。
               第三方 API（DeepSeek / StepFun）按隐私政策处理数据。
             </span>
           </div>
@@ -338,12 +340,25 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
 
         {/* 群面阶段说明（PRD 4.1.3）：阶段色圆点 */}
         <div className="glass-panel p-4">
-          <div className="text-sm font-semibold text-white/85 mb-2">⏱️ 群面流程（倒计时驱动，到点强制切换）</div>
+          <div className="text-sm font-semibold text-white/85 mb-2">
+            {format === 'panel' ? '⏱️ 结构化单面流程' : '⏱️ 群面流程（倒计时驱动，到点强制切换）'}
+          </div>
           <ol className="text-xs text-white/60 space-y-1.5 list-decimal pl-4">
-            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，暂不发言）</li>
-            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
-            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断/抢话）</li>
-            <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）→ 面后报告</li>
+            {format === 'panel' ? (
+              <>
+                <li>阅读面试提纲（5 秒）</li>
+                <li>自我介绍（1 分钟）</li>
+                <li>面试官轮流提问与追问（8 分钟）</li>
+                <li>收尾与补充（2 分钟）→ 面后报告</li>
+              </>
+            ) : (
+              <>
+                <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，暂不发言）</li>
+                <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
+                <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断/抢话）</li>
+                <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）→ 面后报告</li>
+              </>
+            )}
           </ol>
         </div>
 
@@ -358,7 +373,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack }) => {
             disabled={!canEnter}
             className="glass-btn-primary flex-1 py-3 font-bold text-base"
           >
-            进入群面房间
+            {format === 'panel' ? '进入单面房间' : '进入群面房间'}
           </button>
         </div>
       </div>

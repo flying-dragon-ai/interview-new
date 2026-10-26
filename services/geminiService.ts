@@ -1,4 +1,4 @@
-import type { Message, RoleCard, FeedbackData, ReportV15 } from '../types';
+import type { Message, RoleCard, FeedbackData, ReportV15, InterviewFormat } from '../types';
 import { readSseResponse } from './sse.ts';
 /**
  * LLM 服务客户端（PRD 4.1.1 / D1 修复）
@@ -65,16 +65,21 @@ async function postLlm<T>(body: Record<string, unknown>): Promise<LlmResponse<T>
 
 /** 读取 SSE 流：onEvent(event, dataObj) */
 
-/** 流式生成群面题目（SSE 透传） */
+/** 按面试模式生成群面题目或单面提纲（SSE 透传）。 */
 export async function generateTopicStream(
   company: string,
   jobTitle: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  options: { format?: InterviewFormat; topicType?: string } = {}
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/llm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'topic', payload: { company, jobTitle }, stream: true }),
+    body: JSON.stringify({
+      action: 'topic',
+      payload: { company, jobTitle, ...options },
+      stream: true,
+    }),
   });
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => '');

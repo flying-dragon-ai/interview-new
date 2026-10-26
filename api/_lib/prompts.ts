@@ -1,4 +1,4 @@
-import type { RoleCard } from '../../types';
+import type { InterviewFormat, RoleCard } from '../../types';
 import { cardDisplayRole } from '../../data/roleCards.ts';
 import { USER_INFO } from '../../data/userInfo.ts';
 import { extractKeyPoints } from '../../engine/keyPoints.ts';
@@ -669,8 +669,38 @@ ${recentHistory.length > 0 ? recentHistory.map((m) => `${m.senderName}: ${m.cont
 
 
 /** 题目生成 prompt（原 generateTopic / generateTopicStream） */
-export function buildTopicPrompt(company: string, jobTitle: string): string {
+export function buildTopicPrompt(
+  company: string,
+  jobTitle: string,
+  options: { format?: InterviewFormat; topicType?: string } = {}
+): string {
+  if (options.format === 'panel') {
+    return `你是一位资深的${company}面试官，正在为${jobTitle}岗位设计结构化单面提纲。
+候选人只有一位，由多位面试官依次提问和追问。
+
+请结合公司业务和岗位职责，用纯中文文本输出：
+一、面试背景
+用一个简短段落说明岗位场景和候选人需要展现的能力。
+二、考察重点
+列出三至四项与岗位相关的能力，以及可根据候选人经历展开的追问方向。
+三、开场问题
+给出一个适合口头回答的经历或情境问题，后续由面试官根据回答逐步追问。
+
+不要安排多人小组讨论、候选人间辩论或集体总结，不使用群面题型与群面时间分配。
+提纲应便于面试官逐轮提问，不要一次性向候选人抛出全部问题。
+不要输出参考答案或 Markdown 标记。`;
+  }
+  const topicGuidance: Record<string, string> = {
+    business_case: '商业案例题：围绕一个具体业务困境，要求小组制定可执行方案。',
+    open_debate: '开放辩论题：提出有合理正反立场的岗位相关议题，要求比较论据并形成结论。',
+    resource_competition: '资源争夺题：设置明确的有限预算或资源以及相互竞争的需求，要求协商分配。',
+    priority_ranking: '优先级排序题：给出多项任务及明确约束，要求排序并解释取舍。',
+  };
+  const guidance = topicGuidance[options.topicType ?? ''] ?? topicGuidance.business_case;
   return `你是一位资深的${company}面试官，正在为${jobTitle}岗位设计群面题目。
+
+本次题型要求：${guidance}
+请按该题型设计情境与问题，保持其辩论、分配或排序目标。
 
 请深入分析${company}的业务特点、行业定位、核心产品/服务，以及${jobTitle}岗位在该公司的实际工作场景和核心职责。基于这些信息，设计一个高度贴合、具有实战性的群面题目。
 

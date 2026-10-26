@@ -93,6 +93,23 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+test('/api/llm topic：按模式和题型构建上游提问', async () => {
+  let prompt = '';
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    prompt = JSON.stringify(JSON.parse(String(init.body)).messages);
+    return llmSse(['准备内容']);
+  }) as any;
+  const panel = mockRes();
+  await handler(mockReq({ action: 'topic', payload: { company: '测试公司', jobTitle: '产品经理', format: 'panel' } }), panel);
+  assert.equal(panel.statusCode, 200);
+  assert.match(prompt, /结构化单面提纲/);
+  assert.doesNotMatch(prompt, /本次题型要求/);
+  const lgd = mockRes();
+  await handler(mockReq({ action: 'topic', payload: { company: '测试公司', jobTitle: '产品经理', format: 'lgd', topicType: 'resource_competition' } }), lgd);
+  assert.equal(lgd.statusCode, 200);
+  assert.match(prompt, /资源争夺题/);
+});
+
 test('/api/llm topic：非流式生成并清理 Markdown', async () => {
   globalThis.fetch = (async () => llmSse(['**一、背景**\n测试题目'])) as any;
   const res = mockRes();
