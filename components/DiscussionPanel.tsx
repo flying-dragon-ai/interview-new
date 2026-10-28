@@ -62,7 +62,8 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
   const [textOpen, setTextOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-
+  /** 最近一次由 ASR 回调交付的最终转写：stopAsr 也会返回同一段文本，据此避免重复写入输入框 */
+  const asrFinalRef = useRef<string>('');
   // ---------- 滚动 ----------
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -86,13 +87,18 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
       const finalText = await controller.stopUserAsr();
       setIsListening(false);
       setAsrPartial('');
-      if (finalText) setInputValue((prev) => (prev ? `${prev}${finalText}` : finalText));
+      // ASR 回调已经把这句写进输入框时不再追加（否则同一条转写出现两遍）
+      if (finalText && finalText !== asrFinalRef.current) {
+        setInputValue((prev) => (prev ? `${prev}${finalText}` : finalText));
+      }
+      asrFinalRef.current = '';
       return;
     }
     setIsListening(true);
     await controller.startUserAsr(
       (partial) => setAsrPartial(partial),
       (final) => {
+        asrFinalRef.current = final;
         setAsrPartial('');
         setInputValue((prev) => (prev ? `${prev}${final}` : final));
       }
@@ -327,6 +333,7 @@ const DiscussionPanel: React.FC<DiscussionPanelProps> = ({
         activeCharId={activeCharId}
         awaitingUser={awaitingUser}
         isGenerating={isGenerating}
+        format={format}
       />
     </div>
   );

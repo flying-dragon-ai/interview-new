@@ -8,7 +8,23 @@ import type { Pool } from 'pg';
 
 const SCHEMA_MISS_RE = /(sessions|transcripts|reports|conversation_records|feedback_reports|ai_personas|visual_features|column|relation)/i;
 
-/** 判定是否为 schema 缺表/缺列类错误（其余错误原样上抛） */
+/** PG「对象不存在」错误码：只有这些错误允许跳过该表（迁移未跑），其余错误必须整体回滚 */
+const MISSING_RELATION_CODES = new Set(['42P01', '42703', '3F000', '3D000']);
+
+/**
+ * 判定是否为「表/列/模式不存在」类错误。
+ * 驱动带 code 时用 code 判定（精确，不受错误文案影响）；无 code 时才退回文案匹配。
+ * 与 isSchemaMiss 的区别：isSchemaMiss 是宽匹配（用于插入兼容回退），这里要求精确。
+ */
+export function isMissingRelation(e: unknown): boolean {
+  const code = (e as { code?: string } | null | undefined)?.code;
+  if (typeof code === 'string') return MISSING_RELATION_CODES.has(code);
+  const msg = String((e as Error)?.message ?? '');
+  if (/permission denied/i.test(msg)) return false;
+  return /does not exist|not exist/i.test(msg);
+}
+
+/** 判定是否为 schema 缺表/缺列类错误（宽匹配：其余错误原样上抛） */
 export function isSchemaMiss(e: unknown): boolean {
   return SCHEMA_MISS_RE.test(String((e as Error)?.message ?? ''));
 }
@@ -67,8 +83,11 @@ export async function deleteSessionCascade(pool: Pool, sessionId: number): Promi
       await client.query(`SAVEPOINT ${sp}`);
       try {
         await client.query(`DELETE FROM ${table} WHERE session_id = $1`, [sessionId]);
-      } catch {
-        await client.query(`ROLLBACK TO SAVEPOINT ${sp}`); // 表不存在等：跳过该表
+      } catch (e) {
+        // 只有「表/列不存在」才跳过该表；权限、锁、约束、外键等错误必须整体回滚，
+        // 否则会删掉 sessions 行却留下子表数据（TC-11 隐私红线：不可恢复、无残留）
+        if (!isMissingRelation(e)) throw e;
+        await client.query(`ROLLBACK TO SAVEPOINT ${sp}`); // 表不存在：跳过该表
       } finally {
         await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => undefined);
       }

@@ -20,15 +20,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
   try {
     if (request.method === 'GET') {
       const result = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
-      return response.status(200).json(result.rows[0] ?? null);
+      // 资源不存在 → 404（200 + null 无法区分「不存在」与「存在但字段为空」）
+      if (!result.rows[0]) return response.status(404).json({ error: '会话不存在' });
+      return response.status(200).json(result.rows[0]);
     }
 
-    if (request.method === 'DELETE') {
     if (request.method === 'DELETE') {
       // 事务化级联删除（隐私 TC-11：不可恢复、不留半删状态）
       await deleteSessionCascade(pool, sessionId);
       return response.status(200).json({ deleted: sessionId });
-    }
     }
 
     return response.status(405).json({ error: 'Method not allowed' });

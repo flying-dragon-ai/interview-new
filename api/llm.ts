@@ -38,6 +38,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
   if (!body || typeof body.action !== 'string') {
     return response.status(400).json({ error: '缺少 action 字段' });
   }
+  // payload 缺失是参数错误（400），不能等到解构时抛 TypeError 变成 502「上游挂了」
+  if (!body.payload || typeof body.payload !== 'object') {
+    return response.status(400).json({ error: '缺少 payload 字段' });
+  }
 
   // 限流（Q-N2）
   const limit = checkRateLimit(getClientIp(request), body.session_id ?? null);

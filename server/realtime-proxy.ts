@@ -107,8 +107,21 @@ export function handleRealtimeUpgrade(
   const upstream = new UpstreamWebSocket(endpoint, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-
+  let upgraded = false;
+  const abortUpstream = () => {
+    try {
+      upstream.close();
+    } catch {
+      // 忽略
+    }
+  };
+  // 客户端升级失败时 handleUpgrade 的回调不会执行 → 上游连接没人关闭。
+  // 每漏一个就永久占用上游并发槽（StepFun 上限 5：1 耳 + 4 嘴），漏几次整场退回按键说话。
+  socket.once('close', () => {
+    if (!upgraded) abortUpstream();
+  });
   wss.handleUpgrade(req, socket, head, (client) => {
+    upgraded = true;
     const pending: PendingFrame[] = [];
     // 上游 → 客户端（保留文本/二进制）
     upstream.on(

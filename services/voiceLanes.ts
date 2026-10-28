@@ -47,6 +47,17 @@ export interface VoiceLanePoolOptions {
   playbackFactory?: RealtimeClientOptions['playbackFactory'];
 }
 
+/**
+ * 嘴分路的致命错误判定：
+ * - invalid_request_error：请求本身非法（音色被拒等）→ 重连也没用，摘掉分路
+ * - REALTIME_RECONNECT_FAILED：重连耗尽 → 摘掉分路
+ * 其余（server_error / rate_limit 等瞬时错误）保留分路，等客户端自身重连。
+ */
+export function isFatalLaneError(code: string | undefined): boolean {
+  if (!code) return false;
+  return code === 'invalid_request_error' || code === 'REALTIME_RECONNECT_FAILED';
+}
+
 export class VoiceLaneUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -220,6 +231,12 @@ export class VoiceLanePool {
         this.events.onPlaybackChange?.(speaking, voiceId);
       },
       onError: (e) => {
+        // 只有「不可恢复」的错误才摘掉分路；瞬时错误（server_error 等）交给客户端自身重连，
+        // 摘掉 = 该音色整场退回 TTS（听起来像角色中途换了个人说话）
+        if (!isFatalLaneError(e.code)) {
+          this.events.onError?.({ code: e.code, message: e.message, voiceId });
+          return;
+        }
         this.forget(voiceId);
         this.events.onError?.({ code: e.code, message: e.message, voiceId });
       },

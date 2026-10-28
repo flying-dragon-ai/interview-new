@@ -22,13 +22,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(403).json({ error: '预设形象不可删除' });
     }
     // 数据库删除（P1 上传形象）：未配置数据库时仅返回成功语义
+    // avatars.id 是 SERIAL 主键 → 数字 id 按数字传；非数字 id 原样传（由 DB 判定）
+    const numericId = Number(id);
+    const param: string | number = Number.isInteger(numericId) ? numericId : id;
     try {
       const { getPool, isDatabaseConfigured } = await import('./_lib/db.ts');
       if (isDatabaseConfigured()) {
-        await getPool().query('DELETE FROM avatars WHERE id = $1', [id]);
+        await getPool().query('DELETE FROM avatars WHERE id = $1', [param]);
       }
     } catch (err) {
+      // 删除失败必须如实报错：吞掉错误再回 200 = 谎报「已删除」，用户数据其实还在库里
       console.error('/api/avatars delete error:', err);
+      return response.status(500).json({ error: '删除失败', code: 'DB_ERROR' });
     }
     return response.status(200).json({ deleted: id });
   }

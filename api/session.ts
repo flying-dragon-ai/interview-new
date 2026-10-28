@@ -124,13 +124,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
     // ---- 详情 ----
     if (request.method === 'GET' && request.query.session_id) {
-      const result = await pool.query('SELECT * FROM sessions WHERE id = $1', [Number(request.query.session_id)]);
+      // 参数校验：非法 id 是 400，不是 500（Number('abc')=NaN 直接进 SQL 会抛 PG 错）
+      const sessionId = Number(request.query.session_id);
+      if (!Number.isInteger(sessionId) || sessionId <= 0) {
+        return response.status(400).json({ error: 'session_id 非法' });
+      }
+      const result = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
       return response.status(200).json(result.rows[0] ?? null);
     }
 
     return response.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) {
     console.error('/api/session error:', error);
-    return response.status(500).json({ error: error.message });
+    // 不把数据库原文回给客户端（会泄露内网 DB 主机/端口与表结构）
+    return response.status(500).json({ error: '服务端错误', code: 'DB_ERROR' });
   }
 }

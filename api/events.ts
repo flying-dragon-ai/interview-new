@@ -18,7 +18,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   try {
     if (request.method === 'POST') {
-      const { session_id, events } = request.body as { session_id?: number; events?: GameEvent[] };
+      // body 可能整体缺失（空请求体/解析失败）→ 走参数校验返回 400，而不是解构抛 TypeError 变 500
+      const { session_id, events } = (request.body ?? {}) as { session_id?: number; events?: GameEvent[] };
       if (!session_id || !Array.isArray(events) || events.length === 0) {
         return response.status(400).json({ error: 'session_id 与 events[] 必填' });
       }
@@ -43,7 +44,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(200).json({ inserted: rows.length });
     }
 
-    if (request.method === 'GET' && request.query.session_id) {
+    if (request.method === 'GET') {
+      // 缺 session_id 是参数问题（400），不是方法问题（405）
+      if (!request.query.session_id) {
+        return response.status(400).json({ error: '必须提供 session_id' });
+      }
       const result = await pool.query(
         'SELECT * FROM events WHERE session_id = $1 ORDER BY timestamp_ms ASC',
         [Number(request.query.session_id)]
@@ -54,6 +59,6 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) {
     console.error('/api/events error:', error);
-    return response.status(500).json({ error: error.message });
+    return response.status(500).json({ error: '服务端错误', code: 'DB_ERROR' });
   }
 }

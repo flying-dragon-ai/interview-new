@@ -164,6 +164,8 @@ export class RealtimeClient {
     this.events = opts.events;
     this.channel = opts.channel ?? 'duplex';
     this.playback = (opts.playbackFactory ?? (() => new RealtimePlayback()))();
+    // 播放队列排空 = 播报自然结束 → onPlaybackChange(false)（否则高亮/打断窗口永远不收敛）
+    this.playback.setOnDrain?.(() => this.events.onPlaybackChange?.(false));
     this.opts = {
       ...opts,
       confirmWindowMs: opts.confirmWindowMs ?? 400,
@@ -313,6 +315,9 @@ export class RealtimeClient {
         this._state = 'closed';
         return;
       }
+      // 断线后进入退避窗口：状态必须立刻改成 connecting。
+      // 留在 'open' 会让上层以为还能说话 → speak() 直接发帧到死连接 → 这一句台词一个字都不响。
+      this._state = 'connecting';
       // 从未成功建连（生产无 WS 端点/断网）：快速重试一次后直接降级，不走 3.5s 常规退避
       if (!this.everOpened) {
         if (this.reconnectAttempt === 0) {
@@ -448,10 +453,20 @@ export class RealtimeClient {
     if (this.mic || this.disposed) return;
     try {
       const micFactory = this.opts.micFactory ?? defaultMicFactory;
-      this.mic = await micFactory((pcm16Base64) => {
+      const handle = await micFactory((pcm16Base64) => {
         if (this.muted || this._state !== 'open') return;
         this.sendJson({ type: 'input_audio_buffer.append', audio: pcm16Base64 });
       });
+      // await 期间可能已 dispose()/stop()：此时没人会再调 stop() → 麦克风轨道会一直亮着
+      if (this.disposed || this.intentionalClose) {
+        try {
+          handle.stop();
+        } catch {
+          // 忽略
+        }
+        return;
+      }
+      this.mic = handle;
     } catch (err) {
       this._state = 'error';
       this.events.onError({

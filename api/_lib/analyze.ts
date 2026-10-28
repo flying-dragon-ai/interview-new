@@ -91,9 +91,15 @@ export async function analyzeSession(
   sessionId: number,
   opts: { persist?: boolean } = {}
 ): Promise<AnalyzeResult> {
-  const sessionRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]).catch(() => ({ rows: [] as any[] }));
+  // 会话不存在 → 直接报错（不吞异常：否则会给不存在的会话编出一份分数）
+  const sessionRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
   const session = sessionRes.rows[0];
-  const topic = session?.topic ?? '';
+  if (!session) {
+    const err = new Error(`会话不存在：${sessionId}`);
+    (err as { code?: string }).code = 'SESSION_NOT_FOUND';
+    throw err;
+  }
+  const topic = session.topic ?? '';
 
   let transcriptRows: any[] = [];
   try {
@@ -142,7 +148,9 @@ export async function analyzeSession(
   if (opts.persist !== false) {
     try {
       await pool.query(
-        `INSERT INTO reports (session_id, overall_score, dimension_scores, evidence_pool, suggestions)
+        // 幂等：先清掉该会话的旧报告再写入（重复触发覆盖，而不是追加多行）
+        `WITH cleared AS (DELETE FROM reports WHERE session_id = $1)
+         INSERT INTO reports (session_id, overall_score, dimension_scores, evidence_pool, suggestions)
          VALUES ($1, $2, $3, $4, $5::jsonb)`,
         [
           sessionId,

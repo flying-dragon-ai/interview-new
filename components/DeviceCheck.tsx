@@ -53,9 +53,13 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
   const [orientationHint, setOrientationHint] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  /** 麦克风流与摄像头流分开持有：共用一个 ref 会互相覆盖，卸载时停不干净（麦克风/摄像头指示灯不熄） */
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
+  /** 扬声器测试音的收尾定时器（卸载时清理，避免对已卸载组件 setState） */
+  const speakerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -91,8 +95,12 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
   // 清理
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+      cameraStreamRef.current = null;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (speakerTimerRef.current) clearTimeout(speakerTimerRef.current);
       audioCtxRef.current?.close().catch(() => undefined);
     };
   }, []);
@@ -101,7 +109,9 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
     setMicStatus('checking');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      // 重测前先停掉旧流，避免多路麦克风同时占用
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = stream;
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const analyser = ctx.createAnalyser();
@@ -124,17 +134,18 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
   const startCameraCheck = async (mode: 'user' | 'environment' = facingMode) => {
     setCameraStatus('checking');
     try {
-      streamRef.current?.getVideoTracks().forEach((t) => t.stop());
+      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: mode },
         audio: false,
       });
-      streamRef.current = stream;
+      cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => undefined);
       }
       setCameraStatus('passed');
+      setCameraEnabled(true); // 失败后重测成功 → 恢复摄像头可用（否则进房间时又被判为无摄像头）
     } catch {
       setCameraStatus('failed');
       setCameraEnabled(false);
@@ -152,6 +163,12 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
     try {
       const ctx = audioCtxRef.current ?? new AudioContext();
       if (!audioCtxRef.current) audioCtxRef.current = ctx;
+      // 浏览器自动播放策略下 ctx 可能是 suspended：不 resume 用户听不到声音，却会被标成「通过」
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (ctx.state !== 'running') {
+        setSpeakerStatus('failed');
+        return;
+      }
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.frequency.value = 440;
@@ -159,14 +176,19 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
       osc.connect(gain).connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.4);
-      setTimeout(() => setSpeakerStatus('passed'), 500);
+      if (speakerTimerRef.current) clearTimeout(speakerTimerRef.current);
+      speakerTimerRef.current = setTimeout(() => {
+        speakerTimerRef.current = null;
+        setSpeakerStatus('passed');
+      }, 500);
     } catch {
       setSpeakerStatus('failed');
     }
   };
 
   const skipCamera = () => {
-    streamRef.current?.getVideoTracks().forEach((t) => t.stop());
+    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+    cameraStreamRef.current = null;
     setCameraStatus('skipped');
     setCameraEnabled(false);
   };
@@ -258,7 +280,7 @@ const DeviceCheck: React.FC<DeviceCheckProps> = ({ onReady, onBack, format = 'lg
           <div className="flex flex-col gap-2 shrink-0">
             <button
               onClick={() => startCameraCheck()}
-              disabled={cameraStatus === 'checking' || !cameraEnabled}
+              disabled={cameraStatus === 'checking'}
               className="glass-btn px-4 py-2 text-sm font-medium"
             >
               {cameraStatus === 'passed' ? '已通过' : '开始检测'}

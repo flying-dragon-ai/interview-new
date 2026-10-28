@@ -17,9 +17,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
   try {
     const result = await getPool()
-      .query('SELECT * FROM reports WHERE session_id = $1', [sessionId])
-      .catch(() => getPool().query('SELECT * FROM feedback_reports WHERE session_id = $1', [sessionId]));
-    return response.status(200).json(result.rows[0] ?? null);
+      // 固定取最新一条（重跑分析会覆盖 reports 行，读取必须确定）
+      .query('SELECT * FROM reports WHERE session_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1', [sessionId])
+      .catch(() => getPool().query('SELECT * FROM feedback_reports WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1', [sessionId]));
+    if (!result.rows[0]) return response.status(404).json({ error: '报告不存在' });
+    return response.status(200).json(result.rows[0]);
   } catch (error: any) {
     console.error('/api/sessions/[id]/report error:', error);
     return response.status(500).json({ error: error.message });

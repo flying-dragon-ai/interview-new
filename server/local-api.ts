@@ -27,7 +27,8 @@ const STATIC_ROUTES: Record<string, string> = {
 // Use the same dispatcher as production; it extracts the ID and action from
 // the original URL and keeps local and deployed session routes in sync.
 const DYNAMIC_ROUTES: { re: RegExp; file: string }[] = [
-  { re: /^\/api\/sessions\/\d+(?:\/(?:analyze|report|visual))?\/?$/, file: '/api/sessions.ts' },
+  // 聚合路由自己按 /api/sessions/:id[/action] 分发，非法 id 由它返回 404 JSON
+  { re: /^\/api\/sessions(?:\/[^/]+)?(?:\/(?:analyze|report|visual))?\/?$/, file: '/api/sessions.ts' },
 ];
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -76,7 +77,15 @@ export function localApiPlugin(mode: string): Plugin {
               }
             }
           }
-          if (!file) return next();
+          // 未命中任何 /api 路由：直接 404 JSON。
+          // 不能 next() —— 那会落到 Vite 的 SPA/模块兜底，把 index.html 或服务端源码当响应吐给前端
+          // （生产 Vercel 上同路径是 404 JSON，本地/生产行为必须一致）。
+          if (!file) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ error: 'Not found', path: pathname }));
+            return;
+          }
 
           const query: Record<string, string> = {};
           for (const [k, v] of url.searchParams) query[k] = v;

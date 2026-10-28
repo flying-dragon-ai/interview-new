@@ -77,6 +77,12 @@ export function extractJsonStringField(buffer: string, field: string): string | 
   return parsed.value;
 }
 
+/** 跳过键与值之间的空白（JSON 允许 `"content": "值"`；空白可能晚于键到达，必须动态跳过） */
+function skipWhitespace(text: string, start: number): number {
+  let i = start;
+  while (i < text.length && (text[i] === ' ' || text[i] === '\t' || text[i] === '\n' || text[i] === '\r')) i += 1;
+  return i;
+}
 /** 已提取长度（用于计算增量） */
 export function safeJsonParse<T>(text: string): T | null {
   try {
@@ -119,7 +125,8 @@ export function createStringFieldReader(field: string): IncrementalStringFieldRe
   let valueDone = false;
 
   const parseCurrent = (): { value: string; partial: boolean } | null => {
-    const parsed = parseJsonStringAt(acc, keyEnd);
+    // 值起始位置：键后面可能有空白（`"content": "值"`），且空白可能晚于键到达 → 每次动态跳过
+    const parsed = parseJsonStringAt(acc, skipWhitespace(acc, keyEnd));
     if (!parsed) return null;
     return { value: parsed.value, partial: Boolean(parsed.partial) };
   };

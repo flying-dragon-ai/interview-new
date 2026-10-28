@@ -163,6 +163,10 @@ const App: React.FC = () => {
   };
 
   const restart = () => {
+    // 中途退出房间：把会话收尾（否则库里永远留着 status='DISCUSSING' 的孤儿会话）
+    if (sessionId && state.status === 'DISCUSSING') {
+      void updateSessionStatus(sessionId, 'FINISHED');
+    }
     setState({
       topic: '',
       jobTitle: '',

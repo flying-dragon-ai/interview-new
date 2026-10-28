@@ -22,6 +22,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(200).json({ ...report, persisted });
   } catch (error: any) {
     console.error('/api/sessions/[id]/analyze error:', error);
-    return response.status(500).json({ error: error.message });
+    // 会话不存在 → 404（不编造分数）；其余错误不把数据库原文回给客户端
+    if (error?.code === 'SESSION_NOT_FOUND') {
+      return response.status(404).json({ error: '会话不存在' });
+    }
+    return response.status(500).json({ error: '分析失败', code: 'ANALYZE_FAILED' });
   }
 }

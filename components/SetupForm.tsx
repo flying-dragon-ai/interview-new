@@ -38,7 +38,8 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
   const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_PANEL_SIZE);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-
+  /** 题目卡是否已展开：清空题目内容时不能把输入框自己卸载掉（否则用户没法继续手写） */
+  const [topicShown, setTopicShown] = useState(false);
   const roleCap = format === 'panel' ? panelSize : 3;
   const selectedCards = resolveRoleCards(selectedIds);
   const violations = format === 'panel' ? validatePanelSelection(selectedCards, panelSize) : [];
@@ -76,6 +77,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
     }
     setIsGenerating(true);
     setTopic('');
+    setTopicShown(true);
     try {
       const cleaned = await generateTopicStream(company, jobTitle, (chunk) => setTopic((prev) => prev + chunk), {
         format,
@@ -287,7 +289,7 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
           )}
         </button>
 
-        {topic && (
+        {topicShown && (
           <div>
             <label htmlFor="setup-topic" className="block text-sm font-semibold text-white/60 mb-2">
               {format === 'panel' ? '面试提纲' : '群面题目'}
@@ -298,7 +300,10 @@ const SetupForm: React.FC<SetupFormProps> = ({ onStart }) => {
               <textarea
                 id="setup-topic"
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(e) => {
+                  setTopic(e.target.value);
+                  setTopicShown(true);
+                }}
                 className="w-full h-44 bg-transparent outline-none resize-none text-sm leading-relaxed text-white/85 placeholder:text-white/30"
                 placeholder="生成的题目将显示在这里..."
               />

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RoleCard } from '../../types';
+import type { RoleCard, InterviewFormat } from '../../types';
 import { findAvatarPreset } from '../../data/avatars.ts';
 
 /**
@@ -15,6 +15,8 @@ interface Props {
   activeCharId: string | null;
   awaitingUser: boolean;
   isGenerating: boolean;
+  /** 面试模式：panel 的阶段时长与说明和群面不同 */
+  format?: InterviewFormat;
 }
 
 const ClassicAside: React.FC<Props> = ({
@@ -25,6 +27,7 @@ const ClassicAside: React.FC<Props> = ({
   activeCharId,
   awaitingUser,
   isGenerating,
+  format = 'lgd',
 }) => {
   return (
     <aside className="hidden md:flex md:w-80 lg:w-96 border-l border-white/10 bg-white/[0.03] backdrop-blur-xl flex-col overflow-y-auto p-4 gap-4 shrink-0 glass-scroll">
@@ -72,10 +75,21 @@ const ClassicAside: React.FC<Props> = ({
       <div className="glass-panel p-4">
         <h3 className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-2">阶段说明</h3>
         <ol className="text-[11px] text-white/60 space-y-1.5 list-decimal pl-4">
-          <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，不发言）</li>
-          <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
-          <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断）</li>
-          <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）</li>
+          {format === 'panel' ? (
+            <>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（5 秒，不发言）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />自我介绍（1 分钟）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />面试官问答（≤8 分钟，轮流提问与追问）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />收尾与补充（2 分钟）→ 面后报告</li>
+            </>
+          ) : (
+            <>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-think mr-1 align-middle" />审题（10 秒，不发言）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-speak mr-1 align-middle" />个人陈述（每人 1 分钟）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-discuss mr-1 align-middle" />自由讨论（≤15 分钟，可打断）</li>
+              <li><span className="inline-block w-1.5 h-1.5 rounded-full bg-stage-summary mr-1 align-middle" />总结陈词（3 分钟）</li>
+            </>
+          )}
         </ol>
       </div>
 

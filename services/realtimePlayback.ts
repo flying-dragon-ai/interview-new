@@ -15,10 +15,18 @@ export class RealtimePlayback {
   private queue: AudioBufferSourceNode[] = [];
   private nextStartTime = 0;
   private _playing = false;
+  /** 播放自然结束的回调（队列排空时触发一次）——上层据此收敛 speakingCharId / 打断窗口 */
+  private onDrain: (() => void) | null = null;
   private readonly sampleRate: number;
 
-  constructor(sampleRate: number = REALTIME_OUTPUT_SAMPLE_RATE) {
+  constructor(sampleRate: number = REALTIME_OUTPUT_SAMPLE_RATE, onDrain?: (() => void) | null) {
     this.sampleRate = sampleRate;
+    this.onDrain = onDrain ?? null;
+  }
+
+  /** 替换播放结束回调 */
+  setOnDrain(cb: (() => void) | null): void {
+    this.onDrain = cb;
   }
 
   /** 是否仍有未播完的音频（驱动 speakingCharId 与调度等待） */
@@ -43,7 +51,11 @@ export class RealtimePlayback {
       source.buffer = buffer;
       source.onended = () => {
         this.queue = this.queue.filter((s) => s !== source);
-        if (this.queue.length === 0) this._playing = false;
+        if (this.queue.length === 0) {
+          this._playing = false;
+          // 队列排空 = 播报自然结束：必须通知上层，否则 speakingCharId / 打断窗口永远挂着
+          this.onDrain?.();
+        }
       };
       const analyser = this.ensureAnalyser(ctx);
       source.connect(analyser ?? ctx.destination);

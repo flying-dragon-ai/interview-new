@@ -72,6 +72,8 @@ export interface SessionDeps {
   generateReply?: (params: ReplyParams, onChunk: (chunk: string) => void) => Promise<ReplyResult>;
   /** 测试注入：阶段时长覆盖（phaseEngine 自带测试通道） */
   phaseDurationsMs?: Partial<Record<PhaseId, number>>;
+  /** 测试注入：panel 自我介绍结束后进入问答的等待窗（默认 PANEL_OPENING_ADVANCE_MS） */
+  panelOpeningAdvanceMs?: number;
   /** 测试注入：替换 Realtime 建链（默认 RealtimeClient.create） */
   createRealtimeClient?: (opts: RealtimeClientOptions) => Promise<RealtimeClient>;
   /**
@@ -117,8 +119,16 @@ export class SessionController {
   private realtimeTried = false;
   /** realtime AI 语音播放中的角色（onPlaybackChange 驱动 speakingCharId） */
   private realtimeSpeakingCharId: string | null = null;
-  /** panel：用户最近一次发言时间戳（OPENING 自我介绍后自动进问答） */
-  private lastUserSpeechAt = 0;
+  /** panel：用户「个人陈述阶段内」的发言时间戳（自我介绍说完后自动进问答） */
+  private openingUserSpeechAt = 0;
+  /** 当前发言权窗口归属者（AI 角色 id 或 'user'）：只有它结束时才允许清零 speakEndsAt */
+  private speakWindowOwner: string | null = null;
+  /** 回合纪元：用户打断/插话后自增，在途 LLM 回合据此判定为过期（丢弃，不播报、不夺发言权） */
+  private turnEpoch = 0;
+  /** 已释放：dispose 后置位，阻止在途异步回调把资源复活 */
+  private disposed = false;
+  /** 在途落库请求（转写/事件）：面后分析前必须等齐，否则最后一句可能不在报告里 */
+  private pendingSaves: Promise<unknown>[] = [];
   /** 已做阶段开场白标记（phaseId → 已播） */
   private stageEnterAnnounced = new Set<string>();
   private lastHostNudgeAt = 0;
@@ -149,6 +159,12 @@ export class SessionController {
     return this.deps.format ?? 'lgd';
   }
 
+  /** 发言者身份默认值：panel 阵型的角色都是面试官（阵型 B）；lgd 里主持卡是 host，其余是候选人。 */
+  private defaultSpeakerKind(card: RoleCard): SpeakerKind {
+    if (this.format === 'panel') return 'interviewer';
+    return isHostCard(card) ? 'host' : 'candidate';
+  }
+
   private get snap() {
     return this.store.getSnapshot();
   }
@@ -156,6 +172,9 @@ export class SessionController {
   // ---------- 生命周期 ----------
 
   init(): void {
+    // 重新初始化（StrictMode 双挂载 / 复用同一实例）：清掉上一轮的释放标记
+    this.disposed = false;
+    this.finished = false;
     this.sessionStartAt = Date.now();
     // panel 阵型不做要点跟踪（问答流程不消费要点）；lgd 保持原行为
     const points = this.format === 'panel' ? [] : extractKeyPoints(this.deps.state.topic);
@@ -178,6 +197,7 @@ export class SessionController {
       } else {
         if (this.snap.speakingCharId) this.store.set({ speakingCharId: null });
         this.speakEndsAt = 0;
+        this.speakWindowOwner = null;
       }
     });
     // 摄像头流（房间内预览 + 视觉采集）；失败静默降级，不阻断面试
@@ -185,6 +205,12 @@ export class SessionController {
       navigator.mediaDevices
         .getUserMedia({ video: { facingMode: this.deps.facingMode }, audio: false })
         .then((stream) => {
+          // 权限弹窗期间可能已离开房间/被重新初始化：旧流立即停掉，别覆盖新流
+          if (this.disposed) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          this.userStream?.getTracks().forEach((t) => t.stop());
           this.userStream = stream;
           this.startVision(stream);
         })
@@ -198,6 +224,10 @@ export class SessionController {
   }
 
   dispose(): void {
+    this.disposed = true;
+    // 允许同一实例再次 init()（StrictMode 双挂载）：重置建链尝试标记
+    this.realtimeTried = false;
+    this.turnEpoch += 1; // 在途回合全部作废
     if (this.tickInterval) clearInterval(this.tickInterval);
     this.tickInterval = null;
     if (this.scheduled) clearTimeout(this.scheduled);
@@ -224,7 +254,7 @@ export class SessionController {
     const events = [...this.snap.events, ...newEvents];
     this.store.set({ events });
     if (this.deps.consentSaveTranscript && this.deps.sessionId) {
-      saveEvents(this.deps.sessionId, newEvents); // 聚合特征（同意后保存）
+      this.trackSave(saveEvents(this.deps.sessionId, newEvents)); // 聚合特征（同意后保存）
     }
   }
 
@@ -239,31 +269,55 @@ export class SessionController {
     }
     // 落库（同意后保存转写）
     if (this.deps.consentSaveTranscript && this.deps.sessionId) {
-      saveMessage({
-        sessionId: this.deps.sessionId,
-        speaker: msg.senderId === 'user' ? 'user' : msg.senderId,
-        speakerType: msg.senderId === 'user' ? 'user' : 'ai',
-        speakerId: msg.senderId,
-        speakerName: msg.senderName,
-        message: msg.content,
-        round: messages.length,
-        startMs: msg.startMs,
-        endMs: msg.endMs,
-        confidence: msg.confidence,
-        stepfunSegmentId: msg.stepfunSegmentId ?? null,
-      });
+      this.trackSave(
+        saveMessage({
+          sessionId: this.deps.sessionId,
+          speaker: msg.senderId === 'user' ? 'user' : msg.senderId,
+          speakerType: msg.senderId === 'user' ? 'user' : 'ai',
+          speakerId: msg.senderId,
+          speakerName: msg.senderName,
+          message: msg.content,
+          round: messages.length,
+          startMs: msg.startMs,
+          endMs: msg.endMs,
+          confidence: msg.confidence,
+          stepfunSegmentId: msg.stepfunSegmentId ?? null,
+        })
+      );
     }
   }
 
   // ---------- 完成 ----------
 
   async finishSession(): Promise<void> {
-    if (this.finished) return;
+    if (this.finished || this.disposed) return;
     this.finished = true;
     if (this.scheduled) clearTimeout(this.scheduled);
     // 先把视觉聚合行冲刷落库，再触发面后分析（analyze 需要读到 visual_features）
     const visualRows = await this.stopVision();
+    // 再等齐在途落库（转写/事件）：否则最后一句可能赶不上服务端分析
+    await this.flushSaves();
     this.deps.onFinish(this.snap.messages, this.snap.events, this.sessionStartAt, visualRows);
+  }
+
+  /** 登记在途落库请求（失败不阻断面试；面后分析前统一等齐） */
+  private trackSave(p: Promise<unknown>): void {
+    this.pendingSaves.push(
+      Promise.resolve(p).catch((err) => {
+        console.error('落库失败:', err);
+      })
+    );
+  }
+
+  /** 等齐在途落库请求（最多等 3s，避免 DB 挂死拖住收尾） */
+  private async flushSaves(): Promise<void> {
+    if (this.pendingSaves.length === 0) return;
+    const pending = this.pendingSaves;
+    this.pendingSaves = [];
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
   }
 
   // ---------- AI 发言 ----------
@@ -272,9 +326,12 @@ export class SessionController {
     if (this.finished) return;
     const phase = currentPhase(this.phaseRef, this.phaseConfig);
     if (!phase.allowSpeech && !opts?.force) return;
-    const speakerKind: SpeakerKind = opts?.speakerKind ?? (isHostCard(card) ? 'host' : 'candidate');
+    const speakerKind: SpeakerKind = opts?.speakerKind ?? this.defaultSpeakerKind(card);
     if (this.generating.has(card.id)) return;
     this.generating.add(card.id);
+    // 回合纪元：用户在本次生成期间打断 → 纪元变化 → 本回合作废（不播报、不夺发言权）
+    const epoch = this.turnEpoch;
+    let stale = false;
 
     this.store.set({ activeCharId: card.id, isGenerating: true, streamingText: '', awaitingUser: false });
 
@@ -304,6 +361,12 @@ export class SessionController {
 
       const content = result.content?.trim();
       if (!content) throw new Error('空回复');
+      // 打断校验：用户在生成期间开口/插话 → 本回合作废（不落消息、不播报、不夺发言权）
+      stale = epoch !== this.turnEpoch;
+      if (stale) {
+        console.log('[session] AI 回合被用户打断，丢弃本次台词');
+        return;
+      }
 
       const endedAt = Date.now();
       this.addMessage({
@@ -322,6 +385,7 @@ export class SessionController {
 
       this.turn = registerSpeak(this.turn, card.id, endedAt);
       this.speakEndsAt = endedAt + estimateSpeechMs(content);
+      this.speakWindowOwner = card.id;
       this.pushEvents([
         {
           event_type: 'speak_grant',
@@ -383,7 +447,7 @@ export class SessionController {
     } finally {
       this.generating.delete(card.id);
       this.store.set({ activeCharId: null, isGenerating: false, streamingText: '' });
-      if (this.format === 'panel' && speakerKind === 'interviewer' && !this.finished) {
+      if (!stale && this.format === 'panel' && speakerKind === 'interviewer' && !this.finished) {
         // 阵型 B：面试官问完 → 等候选人回答（不再调度其他面试官盖上去）
         const now = Date.now();
         this.store.set({ awaitingUser: true });
@@ -432,7 +496,8 @@ export class SessionController {
         this.store.set({ awaitingUser: false });
         const card = this.deps.roles.find((c) => c.id === decision.speakerId);
         if (card) {
-          this.turn = registerUserMissedTurn(this.turn);
+          // panel：用户是被提问方，不存在「轮不到用户」；累计 missedTurns 会把话筒错误地抢回用户
+          if (this.format !== 'panel') this.turn = registerUserMissedTurn(this.turn);
           void this.triggerAITurn(card);
         }
       }
@@ -472,8 +537,9 @@ export class SessionController {
       // panel：自我介绍已说完 → 稍候片刻自动进入问答，不等满 60s
       if (
         this.format === 'panel' &&
-        this.lastUserSpeechAt > 0 &&
-        now - this.lastUserSpeechAt > PANEL_OPENING_ADVANCE_MS
+        this.openingUserSpeechAt > 0 &&
+        now - this.openingUserSpeechAt > (this.deps.panelOpeningAdvanceMs ?? PANEL_OPENING_ADVANCE_MS) &&
+        now >= this.speakEndsAt
       ) {
         const nextIndex = Math.min(this.phaseRef.phaseIndex + 1, this.phaseConfigLength());
         this.phaseRef = { ...this.phaseRef, phaseIndex: nextIndex, phaseStartedAt: now };
@@ -575,7 +641,7 @@ export class SessionController {
       void this.triggerAITurn(HOST_CARD, { speakerKind: 'host', force: true });
       return;
     }
-    if (userWaitingTooLong && !this.scheduled && !this.generating.size) {
+    if (userWaitingTooLong && this.format === 'lgd' && !this.scheduled && !this.generating.size) {
       this.scheduleNextTurn(0);
     }
   }
@@ -642,7 +708,11 @@ export class SessionController {
     this.turn = registerSpeak(this.turn, 'user', sentAt);
     // 发言权地板：持续到估算说完（B.5 打断规则按此窗口评估，不封顶）
     this.speakEndsAt = sentAt + estimateSpeechMs(trimmed);
-    this.lastUserSpeechAt = sentAt;
+    this.speakWindowOwner = 'user';
+    // panel：只认「个人陈述阶段内」的发言，用于自我介绍结束后自动进入问答
+    if (this.format === 'panel' && currentPhase(this.phaseRef, this.phaseConfig).id === 'OPENING') {
+      this.openingUserSpeechAt = sentAt;
+    }
     // 用户发言也可能推进要点（仅 lgd）
     this.maybeAdvanceKeyPoint(trimmed);
     // AI 在用户说完后自然回应（封顶等待，避免长文拖慢调度）
@@ -660,6 +730,8 @@ export class SessionController {
     this.realtimeSpeakingCharId = null;
     this.store.set({ speakingCharId: null });
     this.speakEndsAt = 0; // 播报已停 → 关闭打断评估窗口
+    this.speakWindowOwner = null;
+    this.turnEpoch += 1; // 在途的 AI 回合作废（返回后不再播报、不夺发言权）
     this.bargedInAt = Date.now();
   }
 
@@ -679,6 +751,8 @@ export class SessionController {
     this.realtime?.stopAISpeech();
     this.realtimeSpeakingCharId = null;
     this.speakEndsAt = 0; // 播报已停 → 关闭打断评估窗口
+    this.speakWindowOwner = null;
+    this.turnEpoch += 1; // 在途的 AI 回合作废（LLM 出稿后不再播报）
     // 2. 清生成态 + 标记用户正在说（3D 场景据此切 interrupted 表情）
     this.store.set({ speakingCharId: null, isGenerating: false, userSpeaking: true });
     // 3. 取消挂起的调度（防止 AI 立刻接话把用户盖回去）
@@ -737,7 +811,11 @@ export class SessionController {
           if (!speaking && (!roleId || this.realtimeSpeakingCharId === roleId)) {
             this.realtimeSpeakingCharId = null;
             this.store.set({ speakingCharId: null });
-            this.speakEndsAt = 0;
+            // 只清「自己的」发言权窗口：旧分路被新说话人顶掉时不能清掉新说话人的窗口
+            if (!roleId || this.speakWindowOwner === roleId) {
+              this.speakEndsAt = 0;
+              this.speakWindowOwner = null;
+            }
           }
         },
         earEvents: {
@@ -757,6 +835,12 @@ export class SessionController {
           },
         },
       });
+      // 握手期间可能已 dispose()（离开房间 / StrictMode 双挂载）：立即释放，不复活链路
+      if (this.disposed) {
+        router.dispose();
+        this.store.set({ realtimeStatus: 'fallback' });
+        return;
+      }
       this.router = router;
       this.realtime = router.ear;
       router.ear.setMuted(!this.snap.micOn);
